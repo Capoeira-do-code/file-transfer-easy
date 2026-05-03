@@ -1,6 +1,8 @@
 # File Transfer Easy
 
-App de escritorio en Python para compartir archivos desde tu ordenador con una web local cuidada. Puede publicar con Tailscale Funnel, Cloudflare Quick Tunnel o un puerto propio, y permite subidas si el host lo activa.
+App de escritorio para compartir archivos desde tu ordenador con una web bonita para clientes y un panel admin integrado en una ventana nativa. Publica con Tailscale Funnel, Cloudflare Quick Tunnel o un puerto propio.
+
+El runtime es single-file: el HTML, CSS y JavaScript del panel admin y de la web publica viven embebidos dentro de `app.py`. No hacen falta carpetas `templates/` ni `static/` para ejecutar o compilar.
 
 ## Uso Rapido
 
@@ -16,35 +18,45 @@ El resultado queda en:
 dist\FileTransferEasy.exe
 ```
 
-Ese `.exe` se abre con doble clic y no necesita instalar paquetes Python en el equipo final.
+Ese `.exe` se abre con doble clic y muestra el panel admin nativo (Qt) dentro de la propia app, sin navegador ni WebView para el host. La URL publica del cliente es aparte y no contiene controles admin.
 
-Para usar el proyecto sin compilar, abre con doble clic:
+Para usar sin compilar:
 
 ```text
 iniciar.bat
 ```
 
-El launcher crea `.venv`, instala dependencias y abre la app. Tambien puedes ejecutar:
+Tambien puedes ejecutar:
 
 ```powershell
 python app.py
 ```
 
-Si faltan dependencias, `app.py` intenta instalarlas automaticamente desde `requirements.txt`.
+Si faltan dependencias, la app intenta instalarlas automaticamente desde `requirements.txt`.
+
+La UI host/admin funciona solo con `PySide6` (sin `tkinter`) y es totalmente nativa Qt.
+El idioma de la app host (EN/ES) controla tambien los textos de la web publica.
 
 ## Funciones
 
-- Seleccionar archivos individuales.
-- Seleccionar una carpeta compartida, con opcion de incluir subcarpetas.
-- Permitir o bloquear subidas de clientes.
-- Elegir carpeta donde se guardan las subidas.
+- Panel admin HTML integrado con asistente de 4 pasos: que compartir, acceso, publicacion y enlace listo.
+- Configuracion opcional guardada en `%LOCALAPPDATA%\FileTransferEasy\settings.json`.
+- Seleccionar archivos individuales desde dialogos nativos.
+- Seleccionar carpetas completas, con opcion de incluir subcarpetas.
 - Proteger toda la sesion con contrasena global.
 - Proteger archivos concretos con contrasena propia.
+- Proteger carpetas completas; sus archivos heredan la clave salvo override por archivo.
+- Expirar enlace por minutos, limitar descargas por archivo y bloquear/desbloquear IPs.
+- Exigir contrasena global para subir aunque la pagina publica sea visible.
+- Permitir o bloquear subidas de clientes en vivo.
+- Elegir carpeta donde se guardan las subidas.
 - Descargar archivos individuales o ZIP con los archivos desbloqueados.
 - Ver descargas activas con IP, progreso, velocidad y estado.
-- Anular descargas activas desde la app.
-- Guardar historial persistente en SQLite con IP, archivo, bytes y estado.
-- Exportar historial a CSV.
+- Anular descargas activas desde el panel admin.
+- Menu contextual en archivos, carpetas y descargas.
+- Guardar historial persistente en SQLite y exportar CSV.
+
+Por defecto la app pregunta cada vez. Si marcas **Guardar esta configuracion y no preguntarme la proxima vez**, guarda rutas, modo de publicacion, puertos, subidas y opciones avanzadas no secretas. No guarda contrasenas, hashes ni tokens.
 
 ## Publicacion
 
@@ -62,7 +74,11 @@ winget install --id Cloudflare.cloudflared --accept-package-agreements --accept-
 
 ## Seguridad
 
-La URL incluye un token unico de sesion. Si activas contrasena global, el cliente debe introducirla antes de ver la pagina, subir archivos o descargar ZIP. Si un archivo tiene contrasena propia, aparece en la lista pero no se descarga hasta desbloquearlo.
+La URL publica incluye un token unico de sesion. Si activas contrasena global, el cliente debe introducirla antes de ver la pagina, subir archivos o descargar ZIP.
+
+Las subidas se validan siempre en el servidor. Aunque un cliente tenga una pagina antigua abierta, si el host desactiva subidas, `POST /upload` devuelve `403` y no guarda nada.
+
+El servidor publico solo registra rutas `/s/<token>...`. Las rutas `/admin/<token>...` existen unicamente en el servidor admin local, separado del puerto publicado por Tailscale, Cloudflare o puerto propio.
 
 Las contrasenas se guardan como hash PBKDF2-SHA256 en memoria mientras la app esta abierta. No se guardan en texto plano.
 
@@ -74,7 +90,7 @@ La base de datos local se guarda en:
 %LOCALAPPDATA%\FileTransferEasy\file_transfer_easy.db
 ```
 
-La app registra subidas, descargas, ZIP, IP detectada, user-agent, bytes enviados y estado. La IP se obtiene en modo best-effort desde `CF-Connecting-IP`, `X-Forwarded-For`, `X-Real-IP` o la IP directa. Detras de tuneles o proxies puede aparecer la IP del proxy si no se reenvia la IP real.
+La app registra subidas, descargas, ZIP, IP detectada, user-agent, bytes enviados y estado. La IP se obtiene en modo best-effort desde `CF-Connecting-IP`, `X-Forwarded-For`, `X-Real-IP` o la IP directa.
 
 ## Desarrollo
 

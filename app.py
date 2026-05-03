@@ -6,9 +6,9 @@ import hashlib
 import hmac
 import importlib
 import io
+import json
 import mimetypes
 import os
-import queue
 import re
 import secrets
 import shutil
@@ -28,18 +28,15 @@ from typing import Callable, Iterable
 from urllib.parse import quote
 from urllib.request import urlretrieve
 
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-
-
 APP_NAME = "File Transfer Easy"
 APP_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "FileTransferEasy"
 DB_PATH = APP_DIR / "file_transfer_easy.db"
 LOCAL_BIN_DIR = APP_DIR / "bin"
+SETTINGS_PATH = APP_DIR / "settings.json"
 DEFAULT_UPLOAD_DIR = Path.home() / "Downloads" / "File Transfer Easy Uploads"
 DEFAULT_PORT_CANDIDATES = [80, 8080, 8000, 5000]
 TAILSCALE_PUBLIC_PORTS = ["443", "8443", "10000"]
-REQUIRED_MODULES = {"flask": "Flask", "waitress": "waitress"}
+REQUIRED_MODULES = {"flask": "Flask", "waitress": "waitress", "PySide6": "PySide6"}
 INSTALL_CLOUDFLARED_COMMAND = (
     "winget install --id Cloudflare.cloudflared "
     "--accept-package-agreements --accept-source-agreements"
@@ -49,6 +46,411 @@ CLOUDFLARED_WINDOWS_AMD64_URL = (
     "cloudflared-windows-amd64.exe"
 )
 CHUNK_SIZE = 256 * 1024
+
+DEFAULT_PREFERENCES = {
+    "save_preferences": False,
+    "ui_language": "en",
+    "mode": "auto",
+    "port": "80",
+    "manual_port": False,
+    "tailscale_public_port": "443",
+    "upload_enabled": False,
+    "upload_dir": str(DEFAULT_UPLOAD_DIR),
+    "include_subfolders": False,
+    "file_paths": [],
+    "folders": [],
+    "expiration_minutes": 0,
+    "download_limit_per_file": 0,
+    "uploads_require_global": False,
+}
+
+UI_LANGUAGES = ("en", "es")
+
+I18N = {
+    "en": {
+        "qt": {
+            "language_label": "Language",
+            "language_en": "English",
+            "language_es": "Spanish",
+            "status_prefix": "Status",
+            "status_ready": "Ready",
+            "status_starting": "Starting",
+            "status_published": "Published",
+            "status_local": "Local",
+            "status_stopped": "Stopped",
+            "status_error": "Error",
+            "status_active_transfer": "Active",
+            "status_canceling_transfer": "Canceling",
+            "status_completed_transfer": "Completed",
+            "status_cancelled_transfer": "Cancelled",
+            "status_interrupted_transfer": "Interrupted",
+            "status_error_transfer": "Failed",
+            "tab_files": "Files",
+            "tab_publish": "Publish",
+            "tab_security": "Security",
+            "tab_activity": "Activity",
+            "btn_add_files": "Add Files",
+            "btn_add_folder": "Add Folder",
+            "btn_remove_files": "Remove Files",
+            "btn_remove_folders": "Remove Folders",
+            "btn_refresh_folder": "Refresh Folder",
+            "include_subfolders": "Include Subfolders",
+            "files_name": "Name",
+            "files_size": "Size",
+            "files_source": "Source",
+            "files_protected": "Protected",
+            "files_date": "Date",
+            "folders_name": "Folder",
+            "folders_count": "Files",
+            "folders_size": "Size",
+            "folders_protected": "Protected",
+            "publish_mode": "Mode",
+            "publish_port": "Local Port",
+            "publish_manual_port": "Use Exact Port",
+            "publish_tailscale_port": "Tailscale Public Port",
+            "publish_uploads": "Allow Uploads",
+            "publish_upload_dir": "Upload Folder",
+            "btn_choose": "Choose",
+            "btn_publish": "Publish Now",
+            "btn_stop": "Stop",
+            "btn_copy_url": "Copy URL",
+            "security_global_password": "Global Password",
+            "security_selection_password": "Selection Password",
+            "btn_apply_global": "Set Global",
+            "btn_clear_global": "Clear Global",
+            "btn_apply_file_password": "Protect Files",
+            "btn_clear_file_password": "Unprotect Files",
+            "btn_apply_folder_password": "Protect Folders",
+            "btn_clear_folder_password": "Unprotect Folders",
+            "security_expire_minutes": "Link Expiration Minutes (0 = never)",
+            "security_download_limit": "Per-File Download Limit (0 = unlimited)",
+            "security_uploads_require_global": "Uploads Require Global Password",
+            "btn_save_security": "Save Security Rules",
+            "ip_placeholder": "IP (e.g. 1.2.3.4)",
+            "btn_block_ip": "Block IP",
+            "btn_unblock_ip": "Unblock IP",
+            "activity_cancel": "Cancel Selected Download",
+            "activity_export": "Export CSV",
+            "activity_completed": "Completed",
+            "activity_cancelled": "Cancelled",
+            "activity_failed": "Failed",
+            "activity_type": "Type",
+            "activity_file": "File",
+            "activity_ip": "IP",
+            "activity_progress": "Progress",
+            "activity_speed": "Speed",
+            "activity_status": "Status",
+            "history_time": "Time",
+            "history_type": "Type",
+            "history_file": "File",
+            "history_status": "Status",
+            "history_reason": "Reason",
+            "history_bytes": "Bytes",
+            "history_ip": "IP",
+            "logs_title": "Logs",
+            "history_reason_none": "-",
+            "protected_yes": "Yes",
+            "protected_no": "No",
+            "mode_auto": "Automatic",
+            "mode_tailscale": "Tailscale Funnel",
+            "mode_cloudflare": "Cloudflare Quick Tunnel",
+            "mode_direct": "Direct Port",
+            "context_remove": "Remove",
+            "context_protect": "Protect",
+            "context_unprotect": "Unprotect",
+            "context_open_location": "Open Location",
+            "context_copy_link": "Copy Link",
+            "context_refresh": "Refresh",
+            "password_prompt_title": "Set Password",
+            "password_prompt_file": "Password for selected file(s):",
+            "password_prompt_folder": "Password for selected folder(s):",
+            "error_select_file": "Select at least one file.",
+            "error_select_folder": "Select at least one folder.",
+            "error_no_url": "No share URL is available yet.",
+            "exit_confirm": "Services are still running. Stop everything and exit?",
+            "security_summary": "Blocked IPs: {ips}",
+            "security_on": "ON",
+            "security_off": "OFF",
+            "indicator_global_password": "Global Password",
+            "indicator_upload_guard": "Upload Guard",
+            "indicator_protected_files": "Protected Files",
+            "indicator_protected_folders": "Protected Folders",
+            "activity_log_title": "Activity Log",
+            "recommendation_empty": "Start by adding files or a folder.",
+            "recommendation_ready": "Link is ready. Copy it or stop publishing.",
+            "recommendation_uploads": "Uploads are enabled. Verify target folder before publishing.",
+            "recommendation_publish": "Ready to publish with Automatic mode.",
+        },
+        "web": {
+            "auth_title": "Protected Access",
+            "auth_message": "Enter the global password to view this shared session.",
+            "auth_password_placeholder": "Password",
+            "auth_submit": "Enter",
+            "file_lock_title": "Protected File",
+            "file_lock_message": "Enter the file or folder password to download this file.",
+            "file_lock_submit": "Unlock",
+            "folder_lock_submit": "Unlock Folder",
+            "folder_lock_message": "Enter this folder password.",
+            "wrong_password": "Incorrect password.",
+            "session_title": "Private Session",
+            "shared_files_title": "Shared Files",
+            "shared_files_subtitle": "Download host files. Upload and password rules update in real time.",
+            "files_count": "files",
+            "total_size": "total",
+            "badge_protected": "protected",
+            "download_label": "Download",
+            "empty_title": "No files yet",
+            "empty_subtitle": "The host can add files from the admin panel.",
+            "actions_title": "Actions",
+            "actions_subtitle": "This session remains available while the host app is running.",
+            "download_zip_label": "Download ( ZIP )",
+            "folders_title": "Folders",
+            "folder_password_placeholder": "Folder password",
+            "folder_ok": "OK",
+            "folder_files": "files",
+            "uploads_disabled": "Host disabled uploads.",
+            "upload_title": "Upload Files",
+            "upload_help": "Drag files here or use the picker.",
+            "upload_choose": "Choose Files",
+            "unlock_file_placeholder": "File or folder password",
+            "upload_msg_disabled": "Host disabled uploads.",
+            "upload_msg_sending": "Uploading...",
+            "upload_msg_done": "Operation completed.",
+            "upload_msg_failed": "Upload failed. Verify the host app is still running.",
+            "upload_guard_message": "Unlock the session first.",
+            "upload_global_guard": "Uploads require global password.",
+            "upload_disabled_server": "Uploads are disabled.",
+            "upload_empty": "No file was received.",
+            "upload_no_valid": "No valid files were provided.",
+            "download_limit_message": "Download limit reached for this file.",
+            "download_none_message": "No unlocked files are available for download.",
+            "zip_name": "file-transfer-easy.zip",
+            "status_yes": "Yes",
+            "status_no": "No",
+        },
+    },
+    "es": {
+        "qt": {
+            "language_label": "Idioma",
+            "language_en": "Ingles",
+            "language_es": "Espanol",
+            "status_prefix": "Estado",
+            "status_ready": "Preparado",
+            "status_starting": "Iniciando",
+            "status_published": "Publicado",
+            "status_local": "Local",
+            "status_stopped": "Detenido",
+            "status_error": "Error",
+            "status_active_transfer": "Activa",
+            "status_canceling_transfer": "Cancelando",
+            "status_completed_transfer": "Completada",
+            "status_cancelled_transfer": "Cancelada",
+            "status_interrupted_transfer": "Interrumpida",
+            "status_error_transfer": "Fallida",
+            "tab_files": "Archivos",
+            "tab_publish": "Publicacion",
+            "tab_security": "Seguridad",
+            "tab_activity": "Actividad",
+            "btn_add_files": "Anadir archivos",
+            "btn_add_folder": "Anadir carpeta",
+            "btn_remove_files": "Quitar archivos",
+            "btn_remove_folders": "Quitar carpetas",
+            "btn_refresh_folder": "Refrescar carpeta",
+            "include_subfolders": "Incluir subcarpetas",
+            "files_name": "Nombre",
+            "files_size": "Tamano",
+            "files_source": "Origen",
+            "files_protected": "Protegido",
+            "files_date": "Fecha",
+            "folders_name": "Carpeta",
+            "folders_count": "Archivos",
+            "folders_size": "Tamano",
+            "folders_protected": "Protegida",
+            "publish_mode": "Modo",
+            "publish_port": "Puerto local",
+            "publish_manual_port": "Usar exactamente este puerto",
+            "publish_tailscale_port": "Puerto publico Tailscale",
+            "publish_uploads": "Permitir subidas",
+            "publish_upload_dir": "Carpeta de subidas",
+            "btn_choose": "Elegir",
+            "btn_publish": "Publicar ahora",
+            "btn_stop": "Detener",
+            "btn_copy_url": "Copiar URL",
+            "security_global_password": "Contrasena global",
+            "security_selection_password": "Contrasena para seleccion",
+            "btn_apply_global": "Aplicar global",
+            "btn_clear_global": "Quitar global",
+            "btn_apply_file_password": "Proteger archivos",
+            "btn_clear_file_password": "Desproteger archivos",
+            "btn_apply_folder_password": "Proteger carpetas",
+            "btn_clear_folder_password": "Desproteger carpetas",
+            "security_expire_minutes": "Expirar enlace en minutos (0 = nunca)",
+            "security_download_limit": "Limite por archivo (0 = sin limite)",
+            "security_uploads_require_global": "Subidas requieren contrasena global",
+            "btn_save_security": "Guardar reglas de seguridad",
+            "ip_placeholder": "IP (ej: 1.2.3.4)",
+            "btn_block_ip": "Bloquear IP",
+            "btn_unblock_ip": "Desbloquear IP",
+            "activity_cancel": "Anular descarga seleccionada",
+            "activity_export": "Exportar CSV",
+            "activity_completed": "Completada",
+            "activity_cancelled": "Cancelada",
+            "activity_failed": "Fallida",
+            "activity_type": "Tipo",
+            "activity_file": "Archivo",
+            "activity_ip": "IP",
+            "activity_progress": "Progreso",
+            "activity_speed": "Velocidad",
+            "activity_status": "Estado",
+            "history_time": "Hora",
+            "history_type": "Tipo",
+            "history_file": "Archivo",
+            "history_status": "Estado",
+            "history_reason": "Detalle",
+            "history_bytes": "Bytes",
+            "history_ip": "IP",
+            "logs_title": "Logs",
+            "history_reason_none": "-",
+            "protected_yes": "Si",
+            "protected_no": "No",
+            "mode_auto": "Automatico",
+            "mode_tailscale": "Tailscale Funnel",
+            "mode_cloudflare": "Cloudflare Quick Tunnel",
+            "mode_direct": "Puerto propio",
+            "context_remove": "Quitar",
+            "context_protect": "Proteger",
+            "context_unprotect": "Desproteger",
+            "context_open_location": "Abrir ubicacion",
+            "context_copy_link": "Copiar enlace",
+            "context_refresh": "Refrescar",
+            "password_prompt_title": "Definir contrasena",
+            "password_prompt_file": "Contrasena para archivo(s) seleccionado(s):",
+            "password_prompt_folder": "Contrasena para carpeta(s) seleccionada(s):",
+            "error_select_file": "Selecciona al menos un archivo.",
+            "error_select_folder": "Selecciona al menos una carpeta.",
+            "error_no_url": "Todavia no hay una URL publicada.",
+            "exit_confirm": "Hay servicios activos. Quieres detener todo y salir?",
+            "security_summary": "IPs bloqueadas: {ips}",
+            "security_on": "ACTIVA",
+            "security_off": "INACTIVA",
+            "indicator_global_password": "Contrasena global",
+            "indicator_upload_guard": "Guardia de subida",
+            "indicator_protected_files": "Archivos protegidos",
+            "indicator_protected_folders": "Carpetas protegidas",
+            "activity_log_title": "Registro de actividad",
+            "recommendation_empty": "Empieza anadiendo archivos o una carpeta.",
+            "recommendation_ready": "Enlace listo. Puedes copiarlo o detener la publicacion.",
+            "recommendation_uploads": "Subidas activadas. Revisa la carpeta de destino antes de publicar.",
+            "recommendation_publish": "Todo listo para publicar con modo automatico.",
+        },
+        "web": {
+            "auth_title": "Acceso protegido",
+            "auth_message": "Introduce la contraseña global para ver esta sesión compartida.",
+            "auth_password_placeholder": "Contraseña",
+            "auth_submit": "Entrar",
+            "file_lock_title": "Archivo protegido",
+            "file_lock_message": "Introduce la contraseña del archivo o de su carpeta para descargarlo.",
+            "file_lock_submit": "Desbloquear",
+            "folder_lock_submit": "Desbloquear carpeta",
+            "folder_lock_message": "Introduce la contraseña de esta carpeta.",
+            "wrong_password": "Contraseña incorrecta.",
+            "session_title": "Sesión privada",
+            "shared_files_title": "Archivos compartidos",
+            "shared_files_subtitle": "Descarga archivos del host. Las reglas de subidas y contraseñas se actualizan en vivo.",
+            "files_count": "archivos",
+            "total_size": "total",
+            "badge_protected": "protegido",
+            "download_label": "Descargar",
+            "empty_title": "No hay archivos todavía",
+            "empty_subtitle": "El host puede añadir archivos desde el panel admin.",
+            "actions_title": "Acciones",
+            "actions_subtitle": "La sesión se mantiene disponible mientras la app del host siga abierta.",
+            "download_zip_label": "Descargar ( ZIP )",
+            "folders_title": "Carpetas",
+            "folder_password_placeholder": "Contraseña de carpeta",
+            "folder_ok": "OK",
+            "folder_files": "archivos",
+            "uploads_disabled": "El host desactivó las subidas.",
+            "upload_title": "Subir archivos",
+            "upload_help": "Arrastra archivos aquí o usa el selector.",
+            "upload_choose": "Elegir archivos",
+            "unlock_file_placeholder": "Contraseña del archivo o carpeta",
+            "upload_msg_disabled": "El host desactivó las subidas.",
+            "upload_msg_sending": "Subiendo...",
+            "upload_msg_done": "Operación completada.",
+            "upload_msg_failed": "No se pudo subir. Comprueba que la app del host siga abierta.",
+            "upload_guard_message": "Desbloquea la sesión primero.",
+            "upload_global_guard": "Las subidas requieren contraseña global.",
+            "upload_disabled_server": "Las subidas están desactivadas.",
+            "upload_empty": "No se recibió ningún archivo.",
+            "upload_no_valid": "No había archivos válidos.",
+            "download_limit_message": "Límite de descargas alcanzado para este archivo.",
+            "download_none_message": "No hay archivos desbloqueados para descargar.",
+            "zip_name": "file-transfer-easy.zip",
+            "status_yes": "Si",
+            "status_no": "No",
+        },
+    },
+}
+
+
+def normalize_ui_language(raw: str | None) -> str:
+    language = str(raw or "en").strip().lower()
+    return language if language in UI_LANGUAGES else "en"
+
+
+def i18n_bundle(language: str) -> dict:
+    return I18N[normalize_ui_language(language)]
+
+
+def normalize_status_code(status: str | None) -> str:
+    value = str(status or "").strip().lower()
+    mapping = {
+        "ready": "ready",
+        "starting": "starting",
+        "published": "published",
+        "local": "local",
+        "stopped": "stopped",
+        "error": "error",
+        "preparado": "ready",
+        "iniciando": "starting",
+        "publicado": "published",
+        "detenido": "stopped",
+    }
+    return mapping.get(value, "ready")
+
+
+def localize_controller_status(status: str, labels: dict) -> str:
+    status_code = normalize_status_code(status)
+    return labels.get(f"status_{status_code}", labels.get("status_ready", "Ready"))
+
+
+def localize_transfer_status(status: str, labels: dict) -> str:
+    mapping = {
+        "activa": "status_active_transfer",
+        "cancelando": "status_canceling_transfer",
+        "completada": "status_completed_transfer",
+        "cancelada": "status_cancelled_transfer",
+        "interrumpida": "status_interrupted_transfer",
+        "error": "status_error_transfer",
+    }
+    key = mapping.get(str(status or "").strip().lower())
+    return labels.get(key, str(status or "")) if key else str(status or "")
+
+
+def localize_event_type(event_type: str, labels: dict, language: str | None = None) -> str:
+    mapping = {
+        "download": {"en": "Download", "es": "Descarga"},
+        "download_zip": {"en": "ZIP", "es": "ZIP"},
+        "upload": {"en": "Upload", "es": "Subida"},
+    }
+    language = normalize_ui_language(language) if language else ("es" if labels.get("language_label") == "Idioma" else "en")
+    table = mapping.get(str(event_type or "").strip().lower())
+    return table[language] if table else str(event_type or "")
+
+
+def is_failed_transfer_status(status: str) -> bool:
+    return str(status or "").strip().lower() in {"error", "interrumpida"}
 
 Flask = None
 Response = None
@@ -90,6 +492,95 @@ def missing_runtime_modules() -> list[str]:
     return [label for module, label in REQUIRED_MODULES.items() if importlib.util.find_spec(module) is None]
 
 
+def load_preferences(path: Path | None = None) -> dict:
+    path = path or SETTINGS_PATH
+    if not path.exists():
+        return dict(DEFAULT_PREFERENCES)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return dict(DEFAULT_PREFERENCES)
+    if not isinstance(loaded, dict):
+        return dict(DEFAULT_PREFERENCES)
+    preferences = dict(DEFAULT_PREFERENCES)
+    for key, value in loaded.items():
+        if key in preferences:
+            preferences[key] = value
+    return preferences
+
+
+def save_preferences(preferences: dict, path: Path | None = None) -> None:
+    path = path or SETTINGS_PATH
+    safe = sanitize_preferences(preferences)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(safe, handle, indent=2, ensure_ascii=True)
+
+
+def delete_preferences(path: Path | None = None) -> None:
+    path = path or SETTINGS_PATH
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def sanitize_preferences(raw: dict) -> dict:
+    def as_int(value, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    preferences = dict(DEFAULT_PREFERENCES)
+    preferences["save_preferences"] = bool(raw.get("save_preferences"))
+    preferences["ui_language"] = normalize_ui_language(str(raw.get("ui_language") or "en"))
+    preferences["mode"] = str(raw.get("mode") or "auto")
+    if preferences["mode"] not in {"auto", "tailscale", "cloudflare", "direct"}:
+        preferences["mode"] = "auto"
+    preferences["port"] = str(raw.get("port") or "80")
+    preferences["manual_port"] = bool(raw.get("manual_port"))
+    preferences["tailscale_public_port"] = str(raw.get("tailscale_public_port") or "443")
+    if preferences["tailscale_public_port"] not in TAILSCALE_PUBLIC_PORTS:
+        preferences["tailscale_public_port"] = "443"
+    preferences["upload_enabled"] = bool(raw.get("upload_enabled"))
+    preferences["upload_dir"] = str(raw.get("upload_dir") or DEFAULT_UPLOAD_DIR)
+    preferences["include_subfolders"] = bool(raw.get("include_subfolders"))
+    preferences["file_paths"] = [
+        str(path) for path in raw.get("file_paths", []) if isinstance(path, str) and path.strip()
+    ]
+    folders = []
+    for folder in raw.get("folders", []):
+        if isinstance(folder, str):
+            folders.append({"path": folder, "include_subfolders": preferences["include_subfolders"]})
+        elif isinstance(folder, dict) and folder.get("path"):
+            folders.append(
+                {
+                    "path": str(folder.get("path")),
+                    "include_subfolders": bool(folder.get("include_subfolders")),
+                }
+            )
+    preferences["folders"] = folders
+    preferences["expiration_minutes"] = as_int(raw.get("expiration_minutes"), 0)
+    preferences["download_limit_per_file"] = as_int(raw.get("download_limit_per_file"), 0)
+    preferences["uploads_require_global"] = bool(raw.get("uploads_require_global"))
+    return preferences
+
+
+def preferences_without_secrets(preferences: dict) -> dict:
+    safe = sanitize_preferences(preferences)
+    for forbidden in [
+        "password",
+        "global_password",
+        "file_password",
+        "folder_password",
+        "token",
+        "password_hash",
+        "global_password_hash",
+    ]:
+        safe.pop(forbidden, None)
+    return safe
+
+
 def install_python_dependencies(log: Callable[[str], None] | None = None) -> None:
     requirements = Path(__file__).resolve().parent / "requirements.txt"
     command = [sys.executable, "-m", "pip", "install", "-r", str(requirements)]
@@ -112,6 +603,22 @@ def install_python_dependencies(log: Callable[[str], None] | None = None) -> Non
     importlib.invalidate_caches()
     if not import_web_dependencies():
         raise RuntimeError("Las dependencias se instalaron, pero no se pudieron importar.")
+    remaining = missing_runtime_modules()
+    if remaining:
+        raise RuntimeError("Siguen faltando dependencias: " + ", ".join(remaining))
+
+
+def show_native_notice(title: str, message: str, error: bool = False) -> None:
+    if os.name == "nt":
+        with contextlib.suppress(Exception):
+            import ctypes
+
+            style = 0x00010000  # MB_SETFOREGROUND
+            style |= 0x00000010 if error else 0x00000040  # MB_ICONERROR / MB_ICONINFORMATION
+            ctypes.windll.user32.MessageBoxW(0, message, title, style)
+            return
+    stream = sys.stderr if error else sys.stdout
+    print(f"[{title}] {message}", file=stream)
 
 
 def run_dependency_bootstrap_if_needed() -> bool:
@@ -119,47 +626,34 @@ def run_dependency_bootstrap_if_needed() -> bool:
     if not missing:
         return import_web_dependencies()
 
-    root = tk.Tk()
-    root.title(f"{APP_NAME} - instalacion")
-    root.geometry("620x360")
-    root.configure(bg="#eef3f6")
-    root.resizable(False, False)
+    try:
+        install_python_dependencies()
+    except Exception as exc:
+        show_native_notice(
+            APP_NAME,
+            (
+                "No se pudieron instalar las dependencias automaticamente.\n\n"
+                f"Detalle: {exc}\n\n"
+                "Ejecuta iniciar.bat o instala requirements.txt manualmente."
+            ),
+            error=True,
+        )
+        return False
 
-    frame = ttk.Frame(root, padding=18)
-    frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="Preparando File Transfer Easy", font=("Segoe UI", 16, "bold")).pack(anchor="w")
-    ttk.Label(
-        frame,
-        text="Faltan dependencias. La app las instalara automaticamente y se abrira despues.",
-        wraplength=560,
-    ).pack(anchor="w", pady=(8, 12))
-    output = tk.Text(frame, height=12, bg="#17212b", fg="#d8f3ea", relief="flat", wrap="word")
-    output.pack(fill="both", expand=True)
-    output.configure(state="disabled")
+    if not import_web_dependencies():
+        show_native_notice(
+            APP_NAME,
+            "Las dependencias se instalaron, pero no se pudieron cargar.",
+            error=True,
+        )
+        return False
 
-    done = {"ok": False}
-
-    def log(message: str) -> None:
-        output.configure(state="normal")
-        output.insert("end", message + "\n")
-        output.configure(state="disabled")
-        output.see("end")
-        root.update_idletasks()
-
-    def worker() -> None:
-        try:
-            install_python_dependencies(log)
-            done["ok"] = True
-            log("Listo.")
-        except Exception as exc:
-            log(str(exc))
-            done["ok"] = False
-        finally:
-            root.after(900, root.destroy)
-
-    threading.Thread(target=worker, daemon=True).start()
-    root.mainloop()
-    return done["ok"]
+    show_native_notice(
+        APP_NAME,
+        "Dependencias instaladas correctamente. Iniciando la app.",
+        error=False,
+    )
+    return True
 
 
 def now_iso() -> str:
@@ -392,9 +886,16 @@ class SharedFile:
     mtime: float
     source: str
     password_hash: str | None = None
+    folder_id: str | None = None
 
     @classmethod
-    def from_path(cls, path: Path, source: str = "Host", password: str = "") -> "SharedFile":
+    def from_path(
+        cls,
+        path: Path,
+        source: str = "Host",
+        password: str = "",
+        folder_id: str | None = None,
+    ) -> "SharedFile":
         stat = path.stat()
         return cls(
             id=uuid.uuid4().hex,
@@ -404,7 +905,22 @@ class SharedFile:
             mtime=stat.st_mtime,
             source=source,
             password_hash=make_password_hash(password) if password else None,
+            folder_id=folder_id,
         )
+
+    @property
+    def protected(self) -> bool:
+        return bool(self.password_hash)
+
+
+@dataclass
+class FolderShare:
+    id: str
+    name: str
+    path: str
+    include_subfolders: bool
+    password_hash: str | None = None
+    updated_at: str = ""
 
     @property
     def protected(self) -> bool:
@@ -414,15 +930,28 @@ class SharedFile:
 class ShareState:
     def __init__(self) -> None:
         self.token = secrets.token_urlsafe(18)
+        self._ui_language = "en"
         self._upload_enabled = False
         self._upload_dir = str(DEFAULT_UPLOAD_DIR)
         self._shared_folder = ""
         self._include_subfolders = False
         self._global_password_hash: str | None = None
         self._files: dict[str, SharedFile] = {}
+        self._folders: dict[str, FolderShare] = {}
+        self._expires_at: float | None = None
+        self._download_limit_per_file: int | None = None
+        self._download_counts: dict[str, int] = {}
+        self._blocked_ips: set[str] = set()
+        self._uploads_require_global = False
         self._lock = threading.RLock()
 
-    def add_paths(self, paths: Iterable[str], source: str = "Host", password: str = "") -> tuple[int, list[str]]:
+    def add_paths(
+        self,
+        paths: Iterable[str],
+        source: str = "Host",
+        password: str = "",
+        folder_id: str | None = None,
+    ) -> tuple[int, list[str]]:
         added = 0
         errors: list[str] = []
         with self._lock:
@@ -437,7 +966,12 @@ class ShareState:
                     if resolved in existing:
                         errors.append(f"{path.name}: ya esta en la lista.")
                         continue
-                    item = SharedFile.from_path(resolved, source=source, password=password)
+                    item = SharedFile.from_path(
+                        resolved,
+                        source=source,
+                        password=password,
+                        folder_id=folder_id,
+                    )
                     self._files[item.id] = item
                     existing.add(resolved)
                     added += 1
@@ -445,9 +979,39 @@ class ShareState:
                     errors.append(f"{path.name}: {exc}")
         return added, errors
 
-    def add_folder(self, folder: str, include_subfolders: bool = False) -> tuple[int, list[str]]:
-        paths = list(iter_folder_files(Path(folder), include_subfolders))
-        return self.add_paths([str(path) for path in paths], source="Carpeta")
+    def add_folder(
+        self,
+        folder: str,
+        include_subfolders: bool = False,
+        password: str = "",
+    ) -> tuple[int, list[str]]:
+        folder_path = Path(folder).expanduser()
+        if not folder_path.is_dir():
+            return 0, [f"{folder}: no es una carpeta."]
+        folder_share = FolderShare(
+            id=uuid.uuid4().hex,
+            name=folder_path.name or str(folder_path),
+            path=str(folder_path.resolve()),
+            include_subfolders=bool(include_subfolders),
+            password_hash=make_password_hash(password) if password else None,
+            updated_at=now_iso(),
+        )
+        with self._lock:
+            self._folders[folder_share.id] = folder_share
+        return self.refresh_folder(folder_share.id)
+
+    def refresh_folder(self, folder_id: str) -> tuple[int, list[str]]:
+        with self._lock:
+            folder_share = self._folders.get(folder_id)
+        if not folder_share:
+            return 0, ["Carpeta no encontrada."]
+        folder = Path(folder_share.path)
+        paths = list(iter_folder_files(folder, folder_share.include_subfolders))
+        return self.add_paths(
+            [str(path) for path in paths],
+            source=folder_share.name,
+            folder_id=folder_share.id,
+        )
 
     def configure_shared_folder(self, folder: str, include_subfolders: bool) -> None:
         with self._lock:
@@ -479,6 +1043,7 @@ class ShareState:
     def clear(self) -> None:
         with self._lock:
             self._files.clear()
+            self._folders.clear()
 
     def get(self, file_id: str) -> SharedFile | None:
         with self._lock:
@@ -488,9 +1053,35 @@ class ShareState:
         with self._lock:
             return list(self._files.values())
 
+    def folders_snapshot(self) -> list[FolderShare]:
+        with self._lock:
+            return list(self._folders.values())
+
+    def get_folder(self, folder_id: str) -> FolderShare | None:
+        with self._lock:
+            return self._folders.get(folder_id)
+
+    def remove_folder(self, folder_id: str, remove_files: bool = True) -> bool:
+        with self._lock:
+            removed = self._folders.pop(folder_id, None)
+            if removed and remove_files:
+                for file_id in [
+                    item.id for item in self._files.values() if item.folder_id == folder_id
+                ]:
+                    self._files.pop(file_id, None)
+        return removed is not None
+
     def has_files(self) -> bool:
         with self._lock:
             return bool(self._files)
+
+    def set_ui_language(self, language: str) -> None:
+        with self._lock:
+            self._ui_language = normalize_ui_language(language)
+
+    def ui_language(self) -> str:
+        with self._lock:
+            return self._ui_language
 
     def configure_uploads(self, enabled: bool, upload_dir: str) -> None:
         with self._lock:
@@ -533,6 +1124,100 @@ class ShareState:
         if not item:
             return False
         return verify_password(password, item.password_hash)
+
+    def set_folder_passwords(self, folder_ids: Iterable[str], password: str) -> int:
+        new_hash = make_password_hash(password) if password else None
+        updated = 0
+        with self._lock:
+            for folder_id in folder_ids:
+                folder = self._folders.get(folder_id)
+                if folder:
+                    folder.password_hash = new_hash
+                    updated += 1
+        return updated
+
+    def effective_password_hash(self, item: SharedFile) -> str | None:
+        with self._lock:
+            if item.password_hash:
+                return item.password_hash
+            if item.folder_id and item.folder_id in self._folders:
+                return self._folders[item.folder_id].password_hash
+        return None
+
+    def item_is_protected(self, item: SharedFile) -> bool:
+        return bool(self.effective_password_hash(item))
+
+    def verify_effective_file_password(self, file_id: str, password: str) -> str | None:
+        item = self.get(file_id)
+        if not item:
+            return None
+        with self._lock:
+            if item.password_hash and verify_password(password, item.password_hash):
+                return "file"
+            if item.folder_id:
+                folder = self._folders.get(item.folder_id)
+                if folder and folder.password_hash and verify_password(password, folder.password_hash):
+                    return "folder"
+        return None
+
+    def configure_security_options(
+        self,
+        expiration_minutes: int | None = None,
+        download_limit_per_file: int | None = None,
+        uploads_require_global: bool = False,
+    ) -> None:
+        with self._lock:
+            self._expires_at = (
+                time.time() + expiration_minutes * 60
+                if expiration_minutes and expiration_minutes > 0
+                else None
+            )
+            self._download_limit_per_file = (
+                download_limit_per_file if download_limit_per_file and download_limit_per_file > 0 else None
+            )
+            self._uploads_require_global = bool(uploads_require_global)
+
+    def security_options(self) -> dict:
+        with self._lock:
+            return {
+                "expires_at": self._expires_at,
+                "expires_at_text": format_mtime(self._expires_at) if self._expires_at else "",
+                "download_limit_per_file": self._download_limit_per_file or 0,
+                "uploads_require_global": self._uploads_require_global,
+                "blocked_ips": sorted(self._blocked_ips),
+            }
+
+    def link_expired(self) -> bool:
+        with self._lock:
+            return bool(self._expires_at and time.time() > self._expires_at)
+
+    def uploads_require_global(self) -> bool:
+        with self._lock:
+            return self._uploads_require_global
+
+    def block_ip(self, ip: str) -> None:
+        ip = ip.strip()
+        if ip:
+            with self._lock:
+                self._blocked_ips.add(ip)
+
+    def unblock_ip(self, ip: str) -> None:
+        with self._lock:
+            self._blocked_ips.discard(ip.strip())
+
+    def ip_blocked(self, ip: str) -> bool:
+        with self._lock:
+            return ip in self._blocked_ips
+
+    def download_limit_reached(self, file_id: str) -> bool:
+        with self._lock:
+            if not self._download_limit_per_file:
+                return False
+            return self._download_counts.get(file_id, 0) >= self._download_limit_per_file
+
+    def record_download_completed(self, file_id: str) -> None:
+        with self._lock:
+            self._download_counts[file_id] = self._download_counts.get(file_id, 0) + 1
 
 
 def iter_folder_files(folder: Path, include_subfolders: bool) -> Iterable[Path]:
@@ -828,6 +1513,41 @@ def build_zip(files: Iterable[SharedFile]) -> Path:
     return temp_path
 
 
+def file_view(item: SharedFile, state: ShareState) -> dict:
+    folder = state.get_folder(item.folder_id) if item.folder_id else None
+    protected = state.item_is_protected(item)
+    return {
+        "id": item.id,
+        "display_name": item.display_name,
+        "path": item.path,
+        "size": item.size,
+        "size_text": format_bytes(item.size),
+        "mtime": item.mtime,
+        "mtime_text": format_mtime(item.mtime),
+        "source": item.source,
+        "folder_id": item.folder_id,
+        "folder_name": folder.name if folder else "",
+        "file_protected": bool(item.password_hash),
+        "folder_protected": bool(folder and folder.password_hash),
+        "protected": protected,
+    }
+
+
+def folder_view(folder: FolderShare, state: ShareState) -> dict:
+    files = [item for item in state.snapshot() if item.folder_id == folder.id]
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "path": folder.path,
+        "include_subfolders": folder.include_subfolders,
+        "protected": folder.protected,
+        "updated_at": folder.updated_at,
+        "file_count": len(files),
+        "total_size": sum(item.size for item in files),
+        "total_size_text": format_bytes(sum(item.size for item in files)),
+    }
+
+
 def session_global_unlocked(state: ShareState) -> bool:
     if not state.global_password_enabled():
         return True
@@ -838,10 +1558,20 @@ def unlocked_file_ids() -> set[str]:
     return set(session.get("unlocked_files", []))
 
 
+def unlocked_folder_ids() -> set[str]:
+    return set(session.get("unlocked_folders", []))
+
+
 def mark_file_unlocked(file_id: str) -> None:
     unlocked = unlocked_file_ids()
     unlocked.add(file_id)
     session["unlocked_files"] = sorted(unlocked)
+
+
+def mark_folder_unlocked(folder_id: str) -> None:
+    unlocked = unlocked_folder_ids()
+    unlocked.add(folder_id)
+    session["unlocked_folders"] = sorted(unlocked)
 
 
 def create_web_app(
@@ -855,24 +1585,56 @@ def create_web_app(
 
     stats = stats or StatsStore()
     transfers = transfers or TransferManager(stats)
-    web_app = Flask(APP_NAME)
+    web_app = Flask(APP_NAME, static_folder=None)
     web_app.secret_key = state.token
     web_app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+
+    @web_app.after_request
+    def no_store(response):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+    def current_language() -> str:
+        return state.ui_language() if hasattr(state, "ui_language") else "en"
+
+    def web_labels() -> dict:
+        return i18n_bundle(current_language())["web"]
 
     def require_token(token: str) -> None:
         if token != state.token:
             abort(404)
+        if state.link_expired():
+            abort(410)
+
+    def require_allowed_ip() -> tuple[str, str]:
+        ip, ip_source = get_client_ip(request)
+        if state.ip_blocked(ip):
+            abort(403)
+        return ip, ip_source
 
     def require_global_or_form(token: str):
         if session_global_unlocked(state):
             return None
-        return render_template_string(LOGIN_HTML, token=token, error="", base_css=BASE_AUTH_CSS)
+        labels = web_labels()
+        return render_template_string(
+            CLIENT_LOGIN_HTML,
+            token=token,
+            error="",
+            auth_css=AUTH_CSS,
+            web=labels,
+            lang=current_language(),
+        )
 
     def can_download_file(item: SharedFile) -> bool:
-        return not item.protected or item.id in unlocked_file_ids()
+        if not state.item_is_protected(item):
+            return True
+        if item.id in unlocked_file_ids():
+            return True
+        return bool(item.folder_id and item.folder_id in unlocked_folder_ids())
 
     def stream_path(path: Path, file_id: str, file_name: str, event_type: str, cleanup: bool = False):
-        ip, ip_source = get_client_ip(request)
+        ip, ip_source = require_allowed_ip()
         user_agent = request.headers.get("User-Agent", "")
         total = path.stat().st_size if path.exists() else 0
         transfer = transfers.start(event_type, file_id, file_name, ip, ip_source, user_agent, total)
@@ -905,6 +1667,8 @@ def create_web_app(
             finally:
                 transfer.bytes_done = sent
                 transfers.finish(transfer.id, status, error)
+                if status == "completada" and event_type == "download":
+                    state.record_download_completed(file_id)
                 if cleanup:
                     with contextlib.suppress(OSError):
                         path.unlink(missing_ok=True)
@@ -921,61 +1685,145 @@ def create_web_app(
     def root():
         return redirect(url_for("share_page", token=state.token))
 
+    @web_app.get("/s/<token>/assets/client.css")
+    def client_css(token: str):
+        require_token(token)
+        return Response(CLIENT_CSS, mimetype="text/css")
+
+    @web_app.get("/s/<token>/assets/client.js")
+    def client_js(token: str):
+        require_token(token)
+        return Response(CLIENT_JS, mimetype="application/javascript")
+
     @web_app.get("/s/<token>")
     def share_page(token: str):
         require_token(token)
+        require_allowed_ip()
         locked_response = require_global_or_form(token)
         if locked_response:
             return locked_response
+        labels = web_labels()
         files = state.snapshot()
+        file_rows = [file_view(item, state) for item in files]
         return render_template_string(
             CLIENT_HTML,
             token=token,
-            files=files,
+            web=labels,
+            lang=current_language(),
+            client_text=labels,
+            files=file_rows,
+            folders=[folder_view(folder, state) for folder in state.folders_snapshot()],
             upload_enabled=state.uploads_enabled(),
             file_count=len(files),
             total_size_text=format_bytes(sum(item.size for item in files)),
-            format_bytes=format_bytes,
-            format_mtime=format_mtime,
             unlocked_files=unlocked_file_ids(),
+            unlocked_folders=unlocked_folder_ids(),
+        )
+
+    @web_app.get("/s/<token>/status")
+    def share_status(token: str):
+        require_token(token)
+        require_allowed_ip()
+        return jsonify(
+            {
+                "ok": True,
+                "upload_enabled": state.uploads_enabled(),
+                "file_count": len(state.snapshot()),
+                "global_locked": not session_global_unlocked(state),
+            }
         )
 
     @web_app.post("/s/<token>/auth")
     def auth_global(token: str):
         require_token(token)
+        require_allowed_ip()
+        labels = web_labels()
         password = request.form.get("password", "")
         if state.verify_global_password(password):
             session["global_unlocked"] = True
             return redirect(url_for("share_page", token=token))
-        return render_template_string(LOGIN_HTML, token=token, error="Contrasena incorrecta.", base_css=BASE_AUTH_CSS), 403
+        return render_template_string(
+            CLIENT_LOGIN_HTML,
+            token=token,
+            error=labels["wrong_password"],
+            auth_css=AUTH_CSS,
+            web=labels,
+            lang=current_language(),
+        ), 403
 
     @web_app.post("/s/<token>/unlock/<file_id>")
     def unlock_file(token: str, file_id: str):
         require_token(token)
+        require_allowed_ip()
+        labels = web_labels()
         if not session_global_unlocked(state):
             return redirect(url_for("share_page", token=token))
         password = request.form.get("password", "")
-        if state.verify_file_password(file_id, password):
+        scope = state.verify_effective_file_password(file_id, password)
+        item = state.get(file_id)
+        if scope == "file":
             mark_file_unlocked(file_id)
+            return redirect(url_for("download_file", token=token, file_id=file_id))
+        if scope == "folder" and item and item.folder_id:
+            mark_folder_unlocked(item.folder_id)
             return redirect(url_for("download_file", token=token, file_id=file_id))
         return render_template_string(
             FILE_PASSWORD_HTML,
             token=token,
             file_id=file_id,
-            error="Contrasena incorrecta.",
-            base_css=BASE_AUTH_CSS,
+            error=labels["wrong_password"],
+            auth_css=AUTH_CSS,
+            web=labels,
+            lang=current_language(),
+        ), 403
+
+    @web_app.post("/s/<token>/unlock-folder/<folder_id>")
+    def unlock_folder(token: str, folder_id: str):
+        require_token(token)
+        require_allowed_ip()
+        labels = web_labels()
+        if not session_global_unlocked(state):
+            return redirect(url_for("share_page", token=token))
+        folder = state.get_folder(folder_id)
+        if not folder:
+            abort(404)
+        password = request.form.get("password", "")
+        if verify_password(password, folder.password_hash):
+            mark_folder_unlocked(folder_id)
+            return redirect(url_for("share_page", token=token))
+        return render_template_string(
+            FOLDER_PASSWORD_HTML,
+            token=token,
+            folder_id=folder_id,
+            folder_name=folder.name,
+            error=labels["wrong_password"],
+            auth_css=AUTH_CSS,
+            web=labels,
+            lang=current_language(),
         ), 403
 
     @web_app.get("/s/<token>/download/<file_id>")
     def download_file(token: str, file_id: str):
         require_token(token)
+        require_allowed_ip()
+        labels = web_labels()
         if not session_global_unlocked(state):
             return redirect(url_for("share_page", token=token))
         item = state.get(file_id)
         if item is None:
             abort(404)
         if not can_download_file(item):
-            return render_template_string(FILE_PASSWORD_HTML, token=token, file_id=file_id, error="", base_css=BASE_AUTH_CSS)
+            return render_template_string(
+                FILE_PASSWORD_HTML,
+                token=token,
+                file_id=file_id,
+                error="",
+                auth_css=AUTH_CSS,
+                web=labels,
+                lang=current_language(),
+            )
+        if state.download_limit_reached(item.id):
+            return labels["download_limit_message"], 403
         path = Path(item.path)
         if not path.is_file():
             abort(404)
@@ -984,26 +1832,31 @@ def create_web_app(
     @web_app.get("/s/<token>/download-all")
     def download_all(token: str):
         require_token(token)
+        require_allowed_ip()
+        labels = web_labels()
         if not session_global_unlocked(state):
             return redirect(url_for("share_page", token=token))
         files = [item for item in state.snapshot() if can_download_file(item)]
         if not files:
-            return "No hay archivos desbloqueados para descargar.", 403
+            return labels["download_none_message"], 403
         zip_path = build_zip(files)
-        return stream_path(zip_path, "zip", "file-transfer-easy.zip", "download_zip", cleanup=True)
+        return stream_path(zip_path, "zip", labels["zip_name"], "download_zip", cleanup=True)
 
     @web_app.post("/s/<token>/upload")
     def upload(token: str):
         require_token(token)
+        labels = web_labels()
+        ip, ip_source = require_allowed_ip()
         if not session_global_unlocked(state):
-            return jsonify({"ok": False, "message": "Desbloquea la sesion primero."}), 403
+            return jsonify({"ok": False, "message": labels["upload_guard_message"]}), 403
+        if state.uploads_require_global() and state.global_password_enabled() and not session.get("global_unlocked"):
+            return jsonify({"ok": False, "message": labels["upload_global_guard"]}), 403
         if not state.uploads_enabled():
-            return jsonify({"ok": False, "message": "Las subidas estan desactivadas."}), 403
+            return jsonify({"ok": False, "message": labels["upload_disabled_server"]}), 403
         uploaded_files = request.files.getlist("files")
         if not uploaded_files:
-            return jsonify({"ok": False, "message": "No se recibio ningun archivo."}), 400
+            return jsonify({"ok": False, "message": labels["upload_empty"]}), 400
         folder = state.upload_folder()
-        ip, ip_source = get_client_ip(request)
         user_agent = request.headers.get("User-Agent", "")
         saved: list[dict[str, str]] = []
         for uploaded in uploaded_files:
@@ -1015,8 +1868,8 @@ def create_web_app(
             saved.append({"id": item.id, "name": item.display_name})
             stats.record_simple("upload", item.id, item.display_name, ip, ip_source, user_agent, item.size, "completada")
         if not saved:
-            return jsonify({"ok": False, "message": "No habia archivos validos."}), 400
-        return jsonify({"ok": True, "message": f"{len(saved)} archivo(s) subido(s).", "files": saved})
+            return jsonify({"ok": False, "message": labels["upload_no_valid"]}), 400
+        return jsonify({"ok": True, "message": labels["upload_msg_done"], "files": saved})
 
     return web_app
 
@@ -1082,10 +1935,12 @@ class TunnelProcess:
         self.process: subprocess.Popen[str] | None = None
         self.thread: threading.Thread | None = None
         self.kind = ""
+        self._lock = threading.RLock()
 
     @property
     def running(self) -> bool:
-        return self.process is not None and self.process.poll() is None
+        with self._lock:
+            return self.process is not None and self.process.poll() is None
 
     def start_tailscale(self, local_port: int, public_port: str) -> None:
         executable = shutil.which("tailscale")
@@ -1099,9 +1954,8 @@ class TunnelProcess:
 
     def _start(self, command: list[str], kind: str) -> None:
         self.stop()
-        self.kind = kind
         self.log(f"Iniciando tunel {kind}: {' '.join(command)}")
-        self.process = subprocess.Popen(
+        process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -1111,27 +1965,38 @@ class TunnelProcess:
             errors="replace",
             creationflags=creation_flags(),
         )
-        self.thread = threading.Thread(target=self._read_output, name=f"{kind}-tunnel", daemon=True)
+        with self._lock:
+            self.kind = kind
+            self.process = process
+        self.thread = threading.Thread(
+            target=self._read_output,
+            args=(process, kind),
+            name=f"{kind}-tunnel",
+            daemon=True,
+        )
         self.thread.start()
 
-    def _read_output(self) -> None:
-        assert self.process is not None
+    def _read_output(self, process: subprocess.Popen[str], kind: str) -> None:
         url_pattern = re.compile(r"https?://[^\s|)]+", re.IGNORECASE)
-        for line in self.process.stdout or []:
+        for line in process.stdout or []:
             clean = line.strip()
             if not clean:
                 continue
             self.log(clean)
             for match in url_pattern.findall(clean):
-                if is_shareable_tunnel_url(self.kind, match):
+                if is_shareable_tunnel_url(kind, match):
                     self.on_url(match.rstrip(".,"))
-        exit_code = self.process.poll()
+        exit_code = process.poll()
         if exit_code not in (None, 0):
             self.log(f"El tunel termino con codigo {exit_code}.")
+        with self._lock:
+            if self.process is process:
+                self.process = None
 
     def stop(self) -> None:
-        process = self.process
-        self.process = None
+        with self._lock:
+            process = self.process
+            self.process = None
         if process is None:
             return
         if process.poll() is None:
@@ -1144,475 +2009,278 @@ class TunnelProcess:
                 process.wait(timeout=5)
 
 
-class FileTransferApp:
-    def __init__(self, root: tk.Tk) -> None:
-        self.root = root
+class AppController:
+    def __init__(self, dialog_runner: Callable[[str], list[str]] | None = None) -> None:
         self.state = ShareState()
         self.stats = StatsStore()
         self.transfers = TransferManager(self.stats)
-        self.log_queue: queue.Queue[str] = queue.Queue()
-        self.web_server = WebServer(self.state, self.stats, self.transfers, self.queue_log)
-        self.tunnel = TunnelProcess(self.queue_log, self.set_public_url)
-
-        self.share_url = tk.StringVar(value="")
-        self.status_text = tk.StringVar(value="Preparado")
-        self.mode = tk.StringVar(value="tailscale")
-        self.local_port = tk.StringVar(value="80")
-        self.manual_port = tk.BooleanVar(value=False)
-        self.tailscale_public_port = tk.StringVar(value="443")
-        self.upload_enabled_var = tk.BooleanVar(value=False)
-        self.upload_dir_var = tk.StringVar(value=str(DEFAULT_UPLOAD_DIR))
-        self.shared_folder_var = tk.StringVar(value="")
-        self.include_subfolders_var = tk.BooleanVar(value=False)
-        self.global_password_var = tk.StringVar(value="")
-        self.file_password_var = tk.StringVar(value="")
-        self.history_ip_filter = tk.StringVar(value="")
-        self.history_file_filter = tk.StringVar(value="")
-        self.history_status_filter = tk.StringVar(value="")
-
-        self._build_style()
-        self._build_ui()
-        self.sync_upload_config()
-        self._schedule_log_flush()
-        self._schedule_refresh()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def _build_style(self) -> None:
-        self.root.title(APP_NAME)
-        self.root.geometry("1180x820")
-        self.root.minsize(1040, 720)
-        self.root.configure(bg="#eef3f6")
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TFrame", background="#eef3f6")
-        style.configure("Panel.TFrame", background="#ffffff")
-        style.configure("TNotebook", background="#eef3f6", borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(16, 8), font=("Segoe UI", 10, "bold"))
-        style.configure("Muted.TLabel", background="#ffffff", foreground="#5f6d7a")
-        style.configure("Body.TLabel", background="#ffffff", foreground="#17212b")
-        style.configure("Title.TLabel", background="#eef3f6", foreground="#17212b")
-        style.configure("PanelTitle.TLabel", background="#ffffff", foreground="#17212b")
-        style.configure("Accent.TButton", padding=(14, 9), font=("Segoe UI", 10, "bold"))
-        style.configure("TButton", padding=(11, 7), font=("Segoe UI", 10))
-        style.configure("TCheckbutton", background="#ffffff", foreground="#17212b")
-        style.configure("TRadiobutton", background="#ffffff", foreground="#17212b")
-        style.configure("Treeview", rowheight=31, font=("Segoe UI", 10))
-        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
-
-    def _panel(self, parent, padding=16) -> ttk.Frame:
-        return ttk.Frame(parent, style="Panel.TFrame", padding=padding)
-
-    def _build_ui(self) -> None:
-        shell = ttk.Frame(self.root, padding=20)
-        shell.pack(fill="both", expand=True)
-        header = ttk.Frame(shell)
-        header.pack(fill="x", pady=(0, 14))
-        ttk.Label(header, text=APP_NAME, style="Title.TLabel", font=("Segoe UI", 24, "bold")).pack(side="left")
-        self.status_badge = tk.Label(header, textvariable=self.status_text, bg="#ffffff", fg="#17212b", padx=14, pady=8, font=("Segoe UI", 10, "bold"))
-        self.status_badge.pack(side="right")
-
-        self.notebook = ttk.Notebook(shell)
-        self.notebook.pack(fill="both", expand=True)
-        self.files_tab = self._panel(self.notebook)
-        self.publish_tab = self._panel(self.notebook)
-        self.security_tab = self._panel(self.notebook)
-        self.activity_tab = self._panel(self.notebook)
-        self.settings_tab = self._panel(self.notebook)
-        for frame, title in [
-            (self.files_tab, "Archivos"),
-            (self.publish_tab, "Publicacion"),
-            (self.security_tab, "Seguridad"),
-            (self.activity_tab, "Actividad"),
-            (self.settings_tab, "Ajustes"),
-        ]:
-            self.notebook.add(frame, text=title)
-
-        self._build_files_tab()
-        self._build_publish_tab()
-        self._build_security_tab()
-        self._build_activity_tab()
-        self._build_settings_tab()
-        self._build_log_panel(shell)
-
-    def _build_files_tab(self) -> None:
-        self.files_tab.columnconfigure(0, weight=1)
-        self.files_tab.rowconfigure(2, weight=1)
-        ttk.Label(self.files_tab, text="Archivos compartidos", style="PanelTitle.TLabel", font=("Segoe UI", 15, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(self.files_tab, text="Anade archivos sueltos o una carpeta completa para que aparezcan en la web.", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 10))
-
-        columns = ("name", "size", "source", "protected", "mtime")
-        self.file_tree = ttk.Treeview(self.files_tab, columns=columns, show="headings", selectmode="extended")
-        for key, text, width in [
-            ("name", "Nombre", 360),
-            ("size", "Tamano", 90),
-            ("source", "Origen", 90),
-            ("protected", "Clave", 80),
-            ("mtime", "Fecha", 150),
-        ]:
-            self.file_tree.heading(key, text=text)
-            self.file_tree.column(key, width=width, minwidth=70)
-        self.file_tree.grid(row=2, column=0, sticky="nsew")
-        ttk.Scrollbar(self.files_tab, orient="vertical", command=self.file_tree.yview).grid(row=2, column=1, sticky="ns")
-
-        actions = ttk.Frame(self.files_tab, style="Panel.TFrame")
-        actions.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        ttk.Button(actions, text="Anadir archivos", command=self.add_files, style="Accent.TButton").pack(side="left")
-        ttk.Button(actions, text="Quitar seleccion", command=self.remove_selected).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Limpiar lista", command=self.clear_files).pack(side="left", padx=(8, 0))
-
-        folder = ttk.Frame(self.files_tab, style="Panel.TFrame")
-        folder.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(16, 0))
-        folder.columnconfigure(1, weight=1)
-        ttk.Label(folder, text="Carpeta compartida", style="Body.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Entry(folder, textvariable=self.shared_folder_var).grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        ttk.Button(folder, text="Elegir", command=self.choose_shared_folder).grid(row=0, column=2)
-        ttk.Checkbutton(folder, text="Incluir subcarpetas", variable=self.include_subfolders_var).grid(row=1, column=1, sticky="w", pady=(8, 0))
-        ttk.Button(folder, text="Actualizar carpeta", command=self.refresh_shared_folder).grid(row=1, column=2, sticky="e", pady=(8, 0))
-
-    def _build_publish_tab(self) -> None:
-        self.publish_tab.columnconfigure(0, weight=1)
-        ttk.Label(self.publish_tab, text="Publicacion", style="PanelTitle.TLabel", font=("Segoe UI", 15, "bold")).grid(row=0, column=0, sticky="w")
-        modes = ttk.Frame(self.publish_tab, style="Panel.TFrame")
-        modes.grid(row=1, column=0, sticky="ew", pady=(12, 0))
-        for value, title, detail in [
-            ("tailscale", "Tailscale Funnel", "Primero intenta Tailscale; si no esta disponible, cae a Cloudflare."),
-            ("cloudflare", "Cloudflare Quick Tunnel", "Instala cloudflared automaticamente si hace falta."),
-            ("direct", "Puerto propio", "Usa LAN/local; router y firewall quedan a cargo del host."),
-        ]:
-            row = ttk.Frame(modes, style="Panel.TFrame")
-            row.pack(fill="x", pady=(0, 8))
-            ttk.Radiobutton(row, text=title, variable=self.mode, value=value).pack(anchor="w")
-            ttk.Label(row, text=detail, style="Muted.TLabel").pack(anchor="w", padx=(24, 0))
-
-        port = ttk.Frame(self.publish_tab, style="Panel.TFrame")
-        port.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        ttk.Label(port, text="Puerto local", style="Body.TLabel").pack(side="left")
-        ttk.Entry(port, textvariable=self.local_port, width=10).pack(side="left", padx=(8, 12))
-        ttk.Checkbutton(port, text="Usar exactamente este puerto", variable=self.manual_port).pack(side="left")
-        ttk.Label(port, text="Puerto publico Tailscale", style="Body.TLabel").pack(side="left", padx=(18, 6))
-        ttk.Combobox(port, textvariable=self.tailscale_public_port, values=TAILSCALE_PUBLIC_PORTS, width=8, state="readonly").pack(side="left")
-
-        uploads = ttk.Frame(self.publish_tab, style="Panel.TFrame")
-        uploads.grid(row=3, column=0, sticky="ew", pady=(18, 0))
-        uploads.columnconfigure(1, weight=1)
-        ttk.Checkbutton(uploads, text="Permitir subidas de clientes", variable=self.upload_enabled_var, command=self.sync_upload_config).grid(row=0, column=0, sticky="w", columnspan=3)
-        ttk.Label(uploads, text="Carpeta de subidas", style="Body.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 0), padx=(0, 8))
-        ttk.Entry(uploads, textvariable=self.upload_dir_var).grid(row=1, column=1, sticky="ew", pady=(10, 0), padx=(0, 8))
-        ttk.Button(uploads, text="Elegir", command=self.choose_upload_dir).grid(row=1, column=2, pady=(10, 0))
-
-        actions = ttk.Frame(self.publish_tab, style="Panel.TFrame")
-        actions.grid(row=4, column=0, sticky="ew", pady=(22, 0))
-        ttk.Button(actions, text="Iniciar", command=self.start, style="Accent.TButton").pack(side="left")
-        ttk.Button(actions, text="Detener", command=self.stop).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Copiar URL", command=self.copy_url).pack(side="left", padx=(8, 0))
-        ttk.Entry(self.publish_tab, textvariable=self.share_url).grid(row=5, column=0, sticky="ew", pady=(14, 0))
-
-    def _build_security_tab(self) -> None:
-        self.security_tab.columnconfigure(0, weight=1)
-        ttk.Label(self.security_tab, text="Seguridad", style="PanelTitle.TLabel", font=("Segoe UI", 15, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(self.security_tab, text="Las contrasenas se guardan con hash local, no como texto plano.", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 16))
-        global_box = ttk.Frame(self.security_tab, style="Panel.TFrame")
-        global_box.grid(row=2, column=0, sticky="ew")
-        global_box.columnconfigure(1, weight=1)
-        ttk.Label(global_box, text="Contrasena global", style="Body.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Entry(global_box, textvariable=self.global_password_var, show="*").grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        ttk.Button(global_box, text="Aplicar", command=self.apply_global_password).grid(row=0, column=2)
-        ttk.Button(global_box, text="Quitar", command=self.clear_global_password).grid(row=0, column=3, padx=(8, 0))
-
-        file_box = ttk.Frame(self.security_tab, style="Panel.TFrame")
-        file_box.grid(row=3, column=0, sticky="ew", pady=(22, 0))
-        file_box.columnconfigure(1, weight=1)
-        ttk.Label(file_box, text="Contrasena para archivos seleccionados", style="Body.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Entry(file_box, textvariable=self.file_password_var, show="*").grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        ttk.Button(file_box, text="Aplicar a seleccion", command=self.apply_file_password).grid(row=0, column=2)
-        ttk.Button(file_box, text="Quitar de seleccion", command=self.clear_file_password).grid(row=0, column=3, padx=(8, 0))
-
-    def _build_activity_tab(self) -> None:
-        self.activity_tab.columnconfigure(0, weight=1)
-        self.activity_tab.rowconfigure(1, weight=1)
-        self.activity_tab.rowconfigure(4, weight=1)
-        ttk.Label(self.activity_tab, text="Descargas activas", style="PanelTitle.TLabel", font=("Segoe UI", 14, "bold")).grid(row=0, column=0, sticky="w")
-        self.active_tree = ttk.Treeview(self.activity_tab, columns=("file", "ip", "progress", "speed", "status"), show="headings", height=6)
-        for key, text, width in [("file", "Archivo", 300), ("ip", "IP", 150), ("progress", "Progreso", 120), ("speed", "Velocidad", 120), ("status", "Estado", 100)]:
-            self.active_tree.heading(key, text=text)
-            self.active_tree.column(key, width=width)
-        self.active_tree.grid(row=1, column=0, sticky="nsew", pady=(8, 8))
-        ttk.Button(self.activity_tab, text="Anular descarga seleccionada", command=self.cancel_selected_transfer).grid(row=2, column=0, sticky="w")
-
-        filters = ttk.Frame(self.activity_tab, style="Panel.TFrame")
-        filters.grid(row=3, column=0, sticky="ew", pady=(18, 8))
-        ttk.Label(filters, text="Historial", style="PanelTitle.TLabel", font=("Segoe UI", 14, "bold")).pack(side="left", padx=(0, 14))
-        ttk.Entry(filters, textvariable=self.history_ip_filter, width=18).pack(side="left")
-        ttk.Entry(filters, textvariable=self.history_file_filter, width=24).pack(side="left", padx=(8, 0))
-        ttk.Combobox(filters, textvariable=self.history_status_filter, values=("", "activa", "completada", "cancelada", "interrumpida", "error"), width=14, state="readonly").pack(side="left", padx=(8, 0))
-        ttk.Button(filters, text="Filtrar", command=self.refresh_history).pack(side="left", padx=(8, 0))
-        ttk.Button(filters, text="Limpiar vista", command=self.clear_history_filters).pack(side="left", padx=(8, 0))
-        ttk.Button(filters, text="Exportar CSV", command=self.export_history_csv).pack(side="left", padx=(8, 0))
-
-        self.history_tree = ttk.Treeview(self.activity_tab, columns=("time", "type", "file", "ip", "bytes", "status"), show="headings")
-        for key, text, width in [("time", "Hora", 155), ("type", "Tipo", 90), ("file", "Archivo", 300), ("ip", "IP", 150), ("bytes", "Bytes", 110), ("status", "Estado", 110)]:
-            self.history_tree.heading(key, text=text)
-            self.history_tree.column(key, width=width)
-        self.history_tree.grid(row=4, column=0, sticky="nsew")
-
-    def _build_settings_tab(self) -> None:
-        ttk.Label(self.settings_tab, text="Ajustes", style="PanelTitle.TLabel", font=("Segoe UI", 15, "bold")).pack(anchor="w")
-        ttk.Label(self.settings_tab, text=f"Base de datos: {DB_PATH}", style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
-        ttk.Label(self.settings_tab, text=f"Cloudflared local: {LOCAL_BIN_DIR}", style="Muted.TLabel").pack(anchor="w", pady=(4, 18))
-        ttk.Button(self.settings_tab, text="Instalar o comprobar cloudflared", command=self.install_cloudflared_from_ui, style="Accent.TButton").pack(anchor="w")
-        ttk.Button(self.settings_tab, text="Comprobar dependencias Python", command=self.install_python_deps_from_ui).pack(anchor="w", pady=(8, 0))
-
-    def _build_log_panel(self, parent: ttk.Frame) -> None:
-        panel = ttk.Frame(parent, padding=(0, 12, 0, 0))
-        panel.pack(fill="x")
-        self.log_text = tk.Text(panel, height=6, bg="#17212b", fg="#d8f3ea", insertbackground="#d8f3ea", relief="flat", font=("Consolas", 9), padx=12, pady=10, wrap="word")
-        self.log_text.pack(fill="x")
-        self.log_text.configure(state="disabled")
-
-    def queue_log(self, message: str) -> None:
-        self.log_queue.put(message)
+        self.admin_token = secrets.token_urlsafe(24)
+        self.dialog_runner = dialog_runner
+        self.logs: list[str] = []
+        self.logs_lock = threading.RLock()
+        self.share_url = ""
+        self.status = "ready"
+        self.local_port = ""
+        self.admin_url = ""
+        self.web_server = WebServer(self.state, self.stats, self.transfers, self.log)
+        self.tunnel = TunnelProcess(self.log, self.set_public_url)
+        self.preferences = load_preferences()
+        self.ui_language = normalize_ui_language(self.preferences.get("ui_language"))
+        self.state.set_ui_language(self.ui_language)
+        self.preferences_saved = SETTINGS_PATH.exists() and bool(self.preferences.get("save_preferences"))
+        self.last_preference_warnings: list[str] = []
+        if self.preferences_saved:
+            self.apply_preferences(self.preferences)
 
     def log(self, message: str) -> None:
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", f"[{now_text()}] {message}\n")
-        self.log_text.configure(state="disabled")
-        self.log_text.see("end")
-
-    def _schedule_log_flush(self) -> None:
-        while True:
-            try:
-                self.log(self.log_queue.get_nowait())
-            except queue.Empty:
-                break
-        self.root.after(150, self._schedule_log_flush)
-
-    def _schedule_refresh(self) -> None:
-        self.refresh_files()
-        self.refresh_active_transfers()
-        self.refresh_history()
-        self.root.after(1500, self._schedule_refresh)
-
-    def add_files(self) -> None:
-        paths = filedialog.askopenfilenames(title="Selecciona archivos para compartir")
-        if not paths:
-            return
-        added, errors = self.state.add_paths(paths)
-        self.refresh_files()
-        self.log(f"{added} archivo(s) anadido(s).")
-        for error in errors:
-            self.log(error)
-
-    def remove_selected(self) -> None:
-        removed = self.state.remove(self.file_tree.selection())
-        self.refresh_files()
-        self.log(f"{removed} archivo(s) quitado(s).")
-
-    def clear_files(self) -> None:
-        if self.state.has_files() and messagebox.askyesno(APP_NAME, "Quitar todos los archivos de la lista?"):
-            self.state.clear()
-            self.refresh_files()
-            self.log("Lista limpiada.")
-
-    def choose_shared_folder(self) -> None:
-        path = filedialog.askdirectory(title="Carpeta compartida")
-        if path:
-            self.shared_folder_var.set(path)
-            self.refresh_shared_folder()
-
-    def refresh_shared_folder(self) -> None:
-        self.state.configure_shared_folder(self.shared_folder_var.get(), self.include_subfolders_var.get())
-        added, errors = self.state.refresh_shared_folder()
-        self.refresh_files()
-        self.log(f"Carpeta actualizada: {added} archivo(s) nuevo(s).")
-        for error in errors:
-            self.log(error)
-
-    def choose_upload_dir(self) -> None:
-        path = filedialog.askdirectory(title="Carpeta donde guardar subidas", initialdir=self.upload_dir_var.get() or str(DEFAULT_UPLOAD_DIR))
-        if path:
-            self.upload_dir_var.set(path)
-            self.sync_upload_config()
-
-    def sync_upload_config(self) -> None:
-        self.state.configure_uploads(self.upload_enabled_var.get(), self.upload_dir_var.get())
-
-    def refresh_files(self) -> None:
-        if not hasattr(self, "file_tree"):
-            return
-        selected = set(self.file_tree.selection())
-        self.file_tree.delete(*self.file_tree.get_children())
-        for item in self.state.snapshot():
-            self.file_tree.insert(
-                "",
-                "end",
-                iid=item.id,
-                values=(item.display_name, format_bytes(item.size), item.source, "Si" if item.protected else "No", format_mtime(item.mtime)),
-            )
-        for file_id in selected:
-            if self.file_tree.exists(file_id):
-                self.file_tree.selection_add(file_id)
-
-    def apply_global_password(self) -> None:
-        password = self.global_password_var.get()
-        self.state.set_global_password(password)
-        self.global_password_var.set("")
-        self.log("Contrasena global aplicada." if password else "Contrasena global quitada.")
-
-    def clear_global_password(self) -> None:
-        self.state.set_global_password("")
-        self.global_password_var.set("")
-        self.log("Contrasena global quitada.")
-
-    def apply_file_password(self) -> None:
-        selected = self.file_tree.selection()
-        if not selected:
-            self.log("Selecciona archivos antes de aplicar una contrasena.")
-            return
-        updated = self.state.set_file_passwords(selected, self.file_password_var.get())
-        self.file_password_var.set("")
-        self.refresh_files()
-        self.log(f"Contrasena aplicada a {updated} archivo(s).")
-
-    def clear_file_password(self) -> None:
-        selected = self.file_tree.selection()
-        updated = self.state.set_file_passwords(selected, "")
-        self.refresh_files()
-        self.log(f"Contrasena quitada de {updated} archivo(s).")
-
-    def refresh_active_transfers(self) -> None:
-        if not hasattr(self, "active_tree"):
-            return
-        current = set(self.active_tree.selection())
-        self.active_tree.delete(*self.active_tree.get_children())
-        for item in self.transfers.snapshot_active():
-            self.active_tree.insert(
-                "",
-                "end",
-                iid=item["id"],
-                values=(
-                    item["file_name"],
-                    f"{item['ip']} ({item['ip_source']})",
-                    f"{item['percent']:.0f}% {format_bytes(item['bytes_done'])}/{format_bytes(item['total_bytes'])}",
-                    f"{format_bytes(int(item['speed']))}/s",
-                    item["status"],
-                ),
-            )
-        for transfer_id in current:
-            if self.active_tree.exists(transfer_id):
-                self.active_tree.selection_add(transfer_id)
-
-    def cancel_selected_transfer(self) -> None:
-        for transfer_id in self.active_tree.selection():
-            if self.transfers.cancel(transfer_id):
-                self.log(f"Descarga anulada: {transfer_id}")
-
-    def refresh_history(self) -> None:
-        if not hasattr(self, "history_tree"):
-            return
-        rows = self.stats.recent_events(
-            ip=self.history_ip_filter.get().strip(),
-            file_name=self.history_file_filter.get().strip(),
-            status=self.history_status_filter.get().strip(),
-        )
-        self.history_tree.delete(*self.history_tree.get_children())
-        for row in rows:
-            self.history_tree.insert(
-                "",
-                "end",
-                values=(
-                    row["updated_at"],
-                    row["event_type"],
-                    row["file_name"],
-                    f"{row['ip']} ({row['ip_source']})",
-                    f"{format_bytes(row['bytes_done'])}/{format_bytes(row['size_total'])}",
-                    row["status"],
-                ),
-            )
-
-    def clear_history_filters(self) -> None:
-        self.history_ip_filter.set("")
-        self.history_file_filter.set("")
-        self.history_status_filter.set("")
-        self.refresh_history()
-
-    def export_history_csv(self) -> None:
-        destination = filedialog.asksaveasfilename(title="Exportar historial", defaultextension=".csv", filetypes=[("CSV", "*.csv")])
-        if not destination:
-            return
-        self.stats.export_csv(Path(destination))
-        self.log(f"Historial exportado: {destination}")
-
-    def install_cloudflared_from_ui(self) -> None:
-        threading.Thread(target=lambda: self.queue_log(f"Cloudflared listo: {install_cloudflared(self.queue_log)}"), daemon=True).start()
-
-    def install_python_deps_from_ui(self) -> None:
-        threading.Thread(target=lambda: self._install_python_deps_worker(), daemon=True).start()
-
-    def _install_python_deps_worker(self) -> None:
-        try:
-            install_python_dependencies(self.queue_log)
-            self.queue_log("Dependencias Python listas.")
-        except Exception as exc:
-            self.queue_log(str(exc))
+        line = f"[{now_text()}] {message}"
+        with self.logs_lock:
+            self.logs.append(line)
+            self.logs = self.logs[-500:]
 
     def set_public_url(self, url: str) -> None:
         if "/s/" not in url:
             url = f"{url.rstrip('/')}/s/{self.state.token}"
-        self.root.after(0, lambda: self._set_url(url))
-
-    def _set_url(self, url: str) -> None:
-        self.share_url.set(url)
-        self.set_status("Publicado")
+        self.share_url = url
+        self.status = "published"
         self.log(f"URL publica lista: {url}")
 
-    def set_status(self, text: str) -> None:
-        self.status_text.set(text)
-        colors = {"Preparado": "#ffffff", "Iniciando": "#fff8dc", "Publicado": "#d8f3ea", "Local": "#e3f0ff", "Detenido": "#ffffff", "Error": "#ffe3df"}
-        self.status_badge.configure(bg=colors.get(text, "#ffffff"))
+    def set_ui_language(self, language: str, persist: bool = True) -> None:
+        language = normalize_ui_language(language)
+        self.ui_language = language
+        self.state.set_ui_language(language)
+        self.preferences["ui_language"] = language
+        if persist:
+            save_preferences(self.preferences)
 
-    def start(self) -> None:
-        if self.web_server.running:
-            self.log("Ya hay una publicacion activa.")
-            return
-        self.sync_upload_config()
-        self.state.configure_shared_folder(self.shared_folder_var.get(), self.include_subfolders_var.get())
-        if self.shared_folder_var.get().strip():
-            self.refresh_shared_folder()
-        port, error = choose_port(self.local_port.get(), self.manual_port.get())
-        if error:
-            messagebox.showerror(APP_NAME, error)
+    def apply_preferences(self, raw_preferences: dict) -> None:
+        preferences = sanitize_preferences(raw_preferences)
+        warnings: list[str] = []
+        self.preferences = preferences
+        self.set_ui_language(preferences.get("ui_language", "en"), persist=False)
+        self.state.configure_uploads(
+            preferences["upload_enabled"],
+            preferences["upload_dir"],
+        )
+        self.state.configure_security_options(
+            preferences["expiration_minutes"],
+            preferences["download_limit_per_file"],
+            preferences["uploads_require_global"],
+        )
+        existing_files = []
+        for path in preferences["file_paths"]:
+            if Path(path).expanduser().is_file():
+                existing_files.append(path)
+            else:
+                warnings.append(f"No existe el archivo guardado: {path}")
+        if existing_files:
+            self.add_files(existing_files)
+        for folder in preferences["folders"]:
+            folder_path = Path(folder["path"]).expanduser()
+            if folder_path.is_dir():
+                self.add_folder(str(folder_path), bool(folder.get("include_subfolders")))
+            else:
+                warnings.append(f"No existe la carpeta guardada: {folder['path']}")
+        self.last_preference_warnings = warnings
+        for warning in warnings:
+            self.log(warning)
+
+    def preferences_payload(self) -> dict:
+        return {
+            "ok": True,
+            "saved": self.preferences_saved,
+            "path": str(SETTINGS_PATH),
+            "preferences": preferences_without_secrets(self.preferences),
+            "warnings": list(self.last_preference_warnings),
+        }
+
+    def save_preferences_from_payload(self, payload: dict) -> dict:
+        preferences = preferences_without_secrets(payload)
+        if not preferences.get("save_preferences"):
+            delete_preferences()
+            self.preferences = dict(DEFAULT_PREFERENCES)
+            self.set_ui_language(self.preferences.get("ui_language", "en"), persist=False)
+            self.preferences_saved = False
+            self.log("Configuracion guardada eliminada.")
+            return self.preferences_payload()
+        save_preferences(preferences)
+        self.preferences = load_preferences()
+        self.set_ui_language(self.preferences.get("ui_language", "en"), persist=False)
+        self.preferences_saved = True
+        self.log("Configuracion guardada.")
+        return self.preferences_payload()
+
+    def delete_saved_preferences(self) -> dict:
+        delete_preferences()
+        self.preferences = dict(DEFAULT_PREFERENCES)
+        self.set_ui_language(self.preferences.get("ui_language", "en"), persist=False)
+        self.preferences_saved = False
+        self.last_preference_warnings = []
+        self.log("Configuracion guardada borrada.")
+        return self.preferences_payload()
+
+    def wizard_step(self) -> int:
+        if self.share_url:
+            return 4
+        if self.state.has_files():
+            return 2
+        return 1
+
+    def recommendation(self) -> str:
+        qt_labels = i18n_bundle(self.ui_language)["qt"]
+        if not self.state.has_files():
+            return qt_labels["recommendation_empty"]
+        if self.share_url:
+            return qt_labels["recommendation_ready"]
+        if self.state.uploads_enabled():
+            return qt_labels["recommendation_uploads"]
+        return qt_labels["recommendation_publish"]
+
+    def serialize(self) -> dict:
+        files = [file_view(item, self.state) for item in self.state.snapshot()]
+        folders = [folder_view(folder, self.state) for folder in self.state.folders_snapshot()]
+        active = self.transfers.snapshot_active()
+        history = self.stats.recent_events(limit=200)
+        qt_labels = i18n_bundle(self.ui_language)["qt"]
+        security = self.state.security_options()
+        history_rows: list[dict] = []
+        for row in history:
+            row_copy = dict(row)
+            status_value = str(row_copy.get("status", ""))
+            row_copy["status_label"] = localize_transfer_status(status_value, qt_labels)
+            row_copy["event_type_label"] = localize_event_type(
+                str(row_copy.get("event_type", "")),
+                qt_labels,
+                self.ui_language,
+            )
+            row_copy["reason_text"] = str(row_copy.get("error") or qt_labels["history_reason_none"])
+            row_copy["bytes_text"] = (
+                f"{format_bytes(int(row_copy.get('bytes_done') or 0))}/"
+                f"{format_bytes(int(row_copy.get('size_total') or 0))}"
+            )
+            if status_value == "completada":
+                row_copy["status_group"] = "completed"
+            elif status_value == "cancelada":
+                row_copy["status_group"] = "cancelled"
+            elif is_failed_transfer_status(status_value):
+                row_copy["status_group"] = "failed"
+            else:
+                row_copy["status_group"] = "active"
+            history_rows.append(row_copy)
+        protected_files = sum(1 for item in files if item.get("protected"))
+        protected_folders = sum(1 for item in folders if item.get("protected"))
+        with self.logs_lock:
+            logs = list(self.logs[-160:])
+        return {
+            "status": localize_controller_status(self.status, qt_labels),
+            "status_code": normalize_status_code(self.status),
+            "share_url": self.share_url,
+            "local_port": self.local_port,
+            "token": self.state.token,
+            "ui_language": self.ui_language,
+            "files": files,
+            "folders": folders,
+            "upload_enabled": self.state.uploads_enabled(),
+            "upload_dir": str(self.state.upload_folder()),
+            "file_count": len(files),
+            "total_size": sum(item["size"] for item in files),
+            "total_size_text": format_bytes(sum(item["size"] for item in files)),
+            "active": active,
+            "history": history_rows,
+            "logs": logs,
+            "security": security,
+            "security_indicators": {
+                "global_password": self.state.global_password_enabled(),
+                "upload_guard": bool(security.get("uploads_require_global")),
+                "protected_files": protected_files,
+                "protected_folders": protected_folders,
+            },
+            "share_running": self.web_server.running,
+            "tunnel_running": self.tunnel.running,
+            "preferences_saved": self.preferences_saved,
+            "preferences": preferences_without_secrets(self.preferences),
+            "wizard_step": self.wizard_step(),
+            "has_files": bool(files),
+            "can_publish": bool(files) and not self.web_server.running,
+            "recommendation": self.recommendation(),
+            "preference_warnings": list(self.last_preference_warnings),
+        }
+
+    def pick(self, kind: str) -> list[str]:
+        if not self.dialog_runner:
+            return []
+        return self.dialog_runner(kind)
+
+    def add_files(self, paths: Iterable[str]) -> dict:
+        added, errors = self.state.add_paths(paths)
+        self.log(f"{added} archivo(s) anadido(s).")
+        for error in errors:
             self.log(error)
-            return
+        return {"ok": not errors, "added": added, "errors": errors}
+
+    def add_folder(self, path: str, include_subfolders: bool = False, password: str = "") -> dict:
+        added, errors = self.state.add_folder(path, include_subfolders, password=password)
+        self.log(f"Carpeta anadida: {added} archivo(s).")
+        for error in errors:
+            self.log(error)
+        return {"ok": not errors, "added": added, "errors": errors}
+
+    def configure_uploads(self, enabled: bool, upload_dir: str) -> dict:
+        self.state.configure_uploads(enabled, upload_dir)
+        if enabled:
+            self.state.upload_folder().mkdir(parents=True, exist_ok=True)
+        self.log("Subidas activadas." if enabled else "Subidas desactivadas.")
+        return {"ok": True}
+
+    def start_publish(self, options: dict) -> dict:
+        if self.web_server.running:
+            return {"ok": False, "message": "Ya hay una publicacion activa."}
+        raw_port = str(options.get("port") or "80")
+        manual = bool(options.get("manual_port"))
+        mode = str(options.get("mode") or "tailscale")
+        tailscale_public_port = str(options.get("tailscale_public_port") or "443")
+        port, error = choose_port(raw_port, manual)
+        if error:
+            self.log(error)
+            return {"ok": False, "message": error}
         assert port is not None
-        if self.upload_enabled_var.get():
-            try:
-                self.state.upload_folder().mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                messagebox.showerror(APP_NAME, f"No se pudo crear la carpeta de subidas:\n{exc}")
-                return
-        self.set_status("Iniciando")
-        self.local_port.set(str(port))
-        try:
-            self.web_server.start(port)
-        except Exception as exc:
-            self.set_status("Error")
-            self.log(str(exc))
-            messagebox.showerror(APP_NAME, str(exc))
-            return
+
+        self.status = "starting"
+        self.local_port = str(port)
+        self.web_server.start(port)
         local_url = f"http://127.0.0.1:{port}/s/{self.state.token}"
         lan_url = f"http://{get_lan_ip()}:{port}/s/{self.state.token}"
-        mode = self.mode.get()
+        self.share_url = local_url
+
+        if mode == "auto":
+            try:
+                self.tunnel.start_tailscale(port, tailscale_public_port)
+                return {"ok": True, "url": self.share_url, "mode": "tailscale"}
+            except Exception as exc:
+                self.log(f"Tailscale no disponible: {exc}")
+                self.log("Intentando Cloudflare Quick Tunnel...")
+            try:
+                self.tunnel.start_cloudflare(port)
+                return {"ok": True, "url": self.share_url, "mode": "cloudflare"}
+            except Exception as exc:
+                self.status = "local"
+                self.share_url = lan_url
+                self.log(f"Cloudflare no disponible: {exc}")
+                self.log(f"URL local: {local_url}")
+                self.log(f"URL LAN: {lan_url}")
+                return {"ok": True, "url": self.share_url, "mode": "direct", "message": str(exc)}
+
         if mode == "direct":
-            self.share_url.set(lan_url)
-            self.set_status("Local")
+            self.share_url = lan_url
+            self.status = "local"
             self.log(f"URL local: {local_url}")
             self.log(f"URL LAN: {lan_url}")
-            return
-        self.share_url.set(local_url)
+            return {"ok": True, "url": self.share_url}
+
         try:
             if mode == "tailscale":
                 try:
-                    self.tunnel.start_tailscale(port, self.tailscale_public_port.get())
+                    self.tunnel.start_tailscale(port, tailscale_public_port)
                 except Exception as exc:
                     self.log(f"Tailscale no disponible: {exc}")
                     self.log("Intentando Cloudflare Quick Tunnel...")
@@ -1620,120 +2288,1335 @@ class FileTransferApp:
             elif mode == "cloudflare":
                 self.tunnel.start_cloudflare(port)
         except Exception as exc:
-            self.set_status("Local")
+            self.status = "local"
             self.log(str(exc))
             self.log(f"URL local disponible: {local_url}")
-            messagebox.showwarning(APP_NAME, str(exc))
+            return {"ok": False, "message": str(exc), "url": local_url}
+        return {"ok": True, "url": self.share_url}
 
-    def stop(self) -> None:
+    def stop_publish(self) -> dict:
         self.tunnel.stop()
         if self.web_server.running:
             self.web_server.stop()
-        self.share_url.set("")
-        self.set_status("Detenido")
+        self.share_url = ""
+        self.status = "stopped"
+        return {"ok": True}
 
-    def copy_url(self) -> None:
-        url = self.share_url.get().strip()
-        if not url:
-            self.log("No hay URL para copiar todavia.")
-            return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(url)
-        self.root.update()
-        self.log("URL copiada al portapapeles.")
+    def open_location(self, file_id: str) -> dict:
+        item = self.state.get(file_id)
+        if not item:
+            return {"ok": False, "message": "Archivo no encontrado."}
+        path = Path(item.path)
+        if os.name == "nt":
+            os.startfile(str(path.parent))
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path.parent)])
+        return {"ok": True}
 
-    def on_close(self) -> None:
-        self.stop()
-        self.root.destroy()
-
-
-LOGIN_HTML = r"""
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Acceso protegido</title><style>{{ base_css|safe }}</style></head><body><main class="auth"><h1>Acceso protegido</h1>
-<p>Introduce la contrasena global para ver la sesion compartida.</p>{% if error %}<div class="error">{{ error }}</div>{% endif %}
-<form method="post" action="{{ url_for('auth_global', token=token) }}"><input name="password" type="password" placeholder="Contrasena" autofocus>
-<button type="submit">Entrar</button></form></main></body></html>
-"""
-
-
-FILE_PASSWORD_HTML = r"""
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Archivo protegido</title><style>{{ base_css|safe }}</style></head><body><main class="auth"><h1>Archivo protegido</h1>
-<p>Introduce la contrasena de este archivo para descargarlo.</p>{% if error %}<div class="error">{{ error }}</div>{% endif %}
-<form method="post" action="{{ url_for('unlock_file', token=token, file_id=file_id) }}"><input name="password" type="password" placeholder="Contrasena" autofocus>
-<button type="submit">Desbloquear</button></form></main></body></html>
-"""
+    def open_folder_location(self, folder_id: str) -> dict:
+        folder = self.state.get_folder(folder_id)
+        if not folder:
+            return {"ok": False, "message": "Carpeta no encontrada."}
+        path = Path(folder.path)
+        if os.name == "nt":
+            os.startfile(str(path))
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+        return {"ok": True}
 
 
-CLIENT_HTML = r"""
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>File Transfer Easy</title>
-  <style>
-    :root{--bg:#eef3f6;--surface:#fff;--ink:#17212b;--muted:#607080;--line:#dce6ec;--teal:#0f8a7a;--teal-dark:#0b6c61;--coral:#ec6d5f;--shadow:0 18px 45px rgba(23,33,43,.1)}
-    *{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);letter-spacing:0}.shell{width:min(1120px,calc(100% - 32px));margin:0 auto;padding:30px 0 38px}.topbar{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:end;padding-bottom:20px}.eyebrow{color:var(--teal-dark);font-weight:750;margin:0 0 8px}h1{margin:0;font-size:2rem;line-height:1.1}.subtitle{margin:10px 0 0;color:var(--muted);line-height:1.5}.stats{display:flex;gap:10px}.stat,.file-card,.tool-panel,.empty{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}.stat{min-width:112px;padding:12px 14px}.stat strong{display:block;font-size:1.2rem}.stat span{color:var(--muted);font-size:.85rem}.layout{display:grid;grid-template-columns:minmax(0,1fr)340px;gap:18px;align-items:start}.file-list{display:grid;gap:10px}.file-card{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px}.file-icon{width:44px;height:44px;border-radius:8px;background:#d8f3ea;color:var(--teal-dark);display:grid;place-items:center;font-weight:800;border:1px solid #b9e5da}.file-title{min-width:0}.file-title a{color:var(--ink);text-decoration:none;font-weight:750;overflow-wrap:anywhere}.file-meta{color:var(--muted);display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:6px;font-size:.92rem}.download,.upload-button{border:0;border-radius:8px;color:#fff;background:var(--teal);padding:11px 14px;min-width:112px;cursor:pointer;font-weight:760;text-decoration:none;text-align:center}.download:hover{background:var(--teal-dark)}.tool-panel{padding:18px;position:sticky;top:16px}.tool-panel h2{margin:0;font-size:1.15rem}.tool-panel p{margin:8px 0 0;color:var(--muted);line-height:1.45}.secondary{display:block;text-align:center;border:1px solid var(--line);color:var(--ink);background:#f7fafb;border-radius:8px;padding:11px 14px;text-decoration:none;font-weight:720;margin-top:12px}.upload-zone{margin-top:18px;border:2px dashed #95cfc5;background:#f4fbf9;border-radius:8px;padding:18px;text-align:center}.upload-zone.drag{border-color:var(--coral);background:#fff3f1}.file-input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.notice,.unlock{margin-top:12px;padding:12px;border-radius:8px;background:#fff8df;color:#684a08;border:1px solid #efd997;font-size:.94rem}.unlock input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;margin:8px 0}.unlock button{width:100%;border:0;border-radius:8px;background:var(--ink);color:#fff;padding:10px;font-weight:750}.message{min-height:22px;margin-top:12px;color:var(--muted);font-size:.94rem}.empty{min-height:260px;display:grid;place-items:center;text-align:center;padding:28px}.empty span{color:var(--muted)}@media(max-width:860px){.topbar,.layout{grid-template-columns:1fr}.tool-panel{position:static}}@media(max-width:620px){.shell{width:min(100% - 20px,1120px);padding-top:18px}h1{font-size:1.55rem}.file-card{grid-template-columns:40px minmax(0,1fr)}.download{grid-column:1/-1;width:100%}.stats{flex-direction:column}}
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <header class="topbar">
-      <div><p class="eyebrow">Sesion privada</p><h1>Archivos compartidos</h1>
-      <p class="subtitle">Descarga lo que necesites. El host puede proteger la sesion completa y tambien archivos concretos.</p></div>
-      <div class="stats"><div class="stat"><strong>{{ file_count }}</strong><span>archivos</span></div><div class="stat"><strong>{{ total_size_text }}</strong><span>total</span></div></div>
-    </header>
-    <section class="layout">
-      <div class="file-list">
-        {% if files %}
-          {% for item in files %}
-            <article class="file-card">
-              <div class="file-icon" aria-hidden="true">{{ item.display_name[:1].upper() or "F" }}</div>
-              <div class="file-title">
-                <a href="{{ url_for('download_file', token=token, file_id=item.id) }}">{{ item.display_name }}</a>
-                <div class="file-meta"><span>{{ format_bytes(item.size) }}</span><span>{{ item.source }}</span><span>{{ format_mtime(item.mtime) }}</span>{% if item.protected %}<span>protegido</span>{% endif %}</div>
-                {% if item.protected and item.id not in unlocked_files %}
-                  <form class="unlock" method="post" action="{{ url_for('unlock_file', token=token, file_id=item.id) }}">
-                    <input name="password" type="password" placeholder="Contrasena de este archivo">
-                    <button type="submit">Desbloquear y descargar</button>
-                  </form>
-                {% endif %}
-              </div>
-              {% if not item.protected or item.id in unlocked_files %}
-                <a class="download" href="{{ url_for('download_file', token=token, file_id=item.id) }}">Descargar</a>
-              {% endif %}
-            </article>
-          {% endfor %}
-        {% else %}
-          <div class="empty"><div><strong>No hay archivos todavia</strong><br><span>El host puede anadir archivos desde la app.</span></div></div>
-        {% endif %}
-      </div>
-      <aside class="tool-panel">
-        <h2>Acciones</h2>
-        <p>Las descargas salen directamente del ordenador host mientras la app siga abierta.</p>
-        {% if files %}<a class="secondary" href="{{ url_for('download_all', token=token) }}">Descargar ZIP permitido</a>{% endif %}
-        {% if upload_enabled %}
-          <form class="upload-zone" id="upload-zone"><strong>Subir archivos</strong><p>Arrastra archivos aqui o usa el selector.</p>
-          <input class="file-input" id="file-input" name="files" type="file" multiple><button class="upload-button" type="button" id="choose-files">Elegir archivos</button><div class="message" id="message"></div></form>
-        {% else %}
-          <div class="notice">Las subidas estan desactivadas por el host.</div>
-        {% endif %}
-      </aside>
-    </section>
-  </main>
-  {% if upload_enabled %}
-  <script>
-    const zone=document.getElementById("upload-zone"),input=document.getElementById("file-input"),button=document.getElementById("choose-files"),message=document.getElementById("message");
-    button.addEventListener("click",()=>input.click());input.addEventListener("change",()=>uploadFiles(input.files));
-    ["dragenter","dragover"].forEach(n=>zone.addEventListener(n,e=>{e.preventDefault();zone.classList.add("drag")}));["dragleave","drop"].forEach(n=>zone.addEventListener(n,e=>{e.preventDefault();zone.classList.remove("drag")}));
-    zone.addEventListener("drop",e=>uploadFiles(e.dataTransfer.files));
-    async function uploadFiles(files){if(!files||files.length===0)return;const formData=new FormData();for(const file of files){formData.append("files",file)}message.textContent="Subiendo...";try{const response=await fetch("{{ url_for('upload', token=token) }}",{method:"POST",body:formData});const data=await response.json();message.textContent=data.message||"Operacion completada.";if(response.ok)setTimeout(()=>window.location.reload(),900)}catch(error){message.textContent="No se pudo subir. Comprueba que la app del host sigue abierta."}finally{input.value=""}}
-  </script>
-  {% endif %}
-</body>
-</html>
-"""
+def create_admin_app(controller: AppController) -> "Flask":
+    if not import_web_dependencies():
+        raise RuntimeError("Faltan dependencias web.")
+    admin_app = Flask(f"{APP_NAME} Admin", static_folder=None)
+    admin_app.secret_key = controller.admin_token
+
+    def require_admin(token: str) -> None:
+        if token != controller.admin_token:
+            abort(404)
+
+    @admin_app.after_request
+    def no_store(response):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+    @admin_app.get("/admin/<token>")
+    def admin_page(token: str):
+        require_admin(token)
+        return render_template_string(ADMIN_HTML, token=token, app_name=APP_NAME)
+
+    @admin_app.get("/admin/<token>/assets/admin.css")
+    def admin_css(token: str):
+        require_admin(token)
+        return Response(ADMIN_CSS, mimetype="text/css")
+
+    @admin_app.get("/admin/<token>/assets/admin.js")
+    def admin_js(token: str):
+        require_admin(token)
+        return Response(ADMIN_JS, mimetype="application/javascript")
+
+    @admin_app.get("/admin/<token>/api/state")
+    def api_state(token: str):
+        require_admin(token)
+        return jsonify(controller.serialize())
+
+    @admin_app.get("/admin/<token>/api/preferences")
+    def api_get_preferences(token: str):
+        require_admin(token)
+        return jsonify(controller.preferences_payload())
+
+    @admin_app.post("/admin/<token>/api/preferences")
+    def api_save_preferences(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        return jsonify(controller.save_preferences_from_payload(data))
+
+    @admin_app.delete("/admin/<token>/api/preferences")
+    def api_delete_preferences(token: str):
+        require_admin(token)
+        return jsonify(controller.delete_saved_preferences())
+
+    @admin_app.post("/admin/<token>/api/files/add")
+    def api_add_files(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        return jsonify(controller.add_files(data.get("paths", [])))
+
+    @admin_app.post("/admin/<token>/api/files/pick")
+    def api_pick_files(token: str):
+        require_admin(token)
+        return jsonify(controller.add_files(controller.pick("files")))
+
+    @admin_app.post("/admin/<token>/api/files/remove")
+    def api_remove_files(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        removed = controller.state.remove(data.get("ids", []))
+        controller.log(f"{removed} archivo(s) quitado(s).")
+        return jsonify({"ok": True, "removed": removed})
+
+    @admin_app.post("/admin/<token>/api/files/password")
+    def api_file_password(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        updated = controller.state.set_file_passwords(data.get("ids", []), data.get("password", ""))
+        controller.log(f"Contrasena de archivo actualizada en {updated} archivo(s).")
+        return jsonify({"ok": True, "updated": updated})
+
+    @admin_app.post("/admin/<token>/api/global-password")
+    def api_global_password(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        controller.state.set_global_password(data.get("password", ""))
+        controller.log("Contrasena global aplicada." if data.get("password") else "Contrasena global quitada.")
+        return jsonify({"ok": True})
+
+    @admin_app.post("/admin/<token>/api/security/options")
+    def api_security_options(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        controller.state.configure_security_options(
+            int(data.get("expiration_minutes") or 0),
+            int(data.get("download_limit_per_file") or 0),
+            bool(data.get("uploads_require_global")),
+        )
+        controller.log("Opciones de seguridad actualizadas.")
+        return jsonify({"ok": True, "security": controller.state.security_options()})
+
+    @admin_app.post("/admin/<token>/api/ips/block")
+    def api_block_ip(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        controller.state.block_ip(data.get("ip", ""))
+        controller.log(f"IP bloqueada: {data.get('ip', '')}")
+        return jsonify({"ok": True, "security": controller.state.security_options()})
+
+    @admin_app.post("/admin/<token>/api/ips/unblock")
+    def api_unblock_ip(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        controller.state.unblock_ip(data.get("ip", ""))
+        controller.log(f"IP desbloqueada: {data.get('ip', '')}")
+        return jsonify({"ok": True, "security": controller.state.security_options()})
+
+    @admin_app.post("/admin/<token>/api/files/open-location")
+    def api_open_location(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        return jsonify(controller.open_location(data.get("id", "")))
+
+    @admin_app.post("/admin/<token>/api/folders/add")
+    def api_add_folder(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        path = data.get("path") or ""
+        return jsonify(
+            controller.add_folder(
+                path,
+                bool(data.get("include_subfolders")),
+                data.get("password", ""),
+            )
+        )
+
+    @admin_app.post("/admin/<token>/api/folders/pick")
+    def api_pick_folder(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        paths = controller.pick("folder")
+        if not paths:
+            return jsonify({"ok": False, "message": "No se selecciono carpeta."})
+        return jsonify(
+            controller.add_folder(
+                paths[0],
+                bool(data.get("include_subfolders")),
+                data.get("password", ""),
+            )
+        )
+
+    @admin_app.post("/admin/<token>/api/folders/refresh")
+    def api_refresh_folder(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        added, errors = controller.state.refresh_folder(data.get("id", ""))
+        controller.log(f"Carpeta refrescada: {added} archivo(s) nuevo(s).")
+        return jsonify({"ok": not errors, "added": added, "errors": errors})
+
+    @admin_app.post("/admin/<token>/api/folders/remove")
+    def api_remove_folder(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        ok = controller.state.remove_folder(data.get("id", ""), bool(data.get("remove_files", True)))
+        controller.log("Carpeta quitada." if ok else "No se encontro la carpeta.")
+        return jsonify({"ok": ok})
+
+    @admin_app.post("/admin/<token>/api/folders/password")
+    def api_folder_password(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        updated = controller.state.set_folder_passwords(data.get("ids", []), data.get("password", ""))
+        controller.log(f"Contrasena de carpeta actualizada en {updated} carpeta(s).")
+        return jsonify({"ok": True, "updated": updated})
+
+    @admin_app.post("/admin/<token>/api/uploads")
+    def api_uploads(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        try:
+            return jsonify(
+                controller.configure_uploads(
+                    bool(data.get("enabled")),
+                    data.get("upload_dir") or str(DEFAULT_UPLOAD_DIR),
+                )
+            )
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @admin_app.post("/admin/<token>/api/publish/start")
+    def api_publish_start(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        try:
+            return jsonify(controller.start_publish(data))
+        except Exception as exc:
+            controller.log(str(exc))
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @admin_app.post("/admin/<token>/api/publish/stop")
+    def api_publish_stop(token: str):
+        require_admin(token)
+        return jsonify(controller.stop_publish())
+
+    @admin_app.post("/admin/<token>/api/transfers/cancel")
+    def api_transfer_cancel(token: str):
+        require_admin(token)
+        data = request.get_json(silent=True) or {}
+        ok = controller.transfers.cancel(data.get("id", ""))
+        return jsonify({"ok": ok})
+
+    @admin_app.get("/admin/<token>/api/history/export")
+    def api_history_export(token: str):
+        require_admin(token)
+        rows = controller.stats.recent_events(limit=10_000)
+        buffer = io.StringIO()
+        fields = [
+            "id",
+            "event_type",
+            "transfer_id",
+            "file_id",
+            "file_name",
+            "ip",
+            "ip_source",
+            "user_agent",
+            "size_total",
+            "bytes_done",
+            "status",
+            "error",
+            "created_at",
+            "updated_at",
+        ]
+        writer = csv.DictWriter(buffer, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fields})
+        return Response(
+            buffer.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=historial.csv"},
+        )
+
+    return admin_app
+
+
+class AdminServer:
+    def __init__(self, controller: AppController, log: Callable[[str], None]) -> None:
+        self.controller = controller
+        self.log = log
+        self.host = "127.0.0.1"
+        self.port: int | None = None
+        self._server = None
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> str:
+        with self._lock:
+            if self.running and self.port:
+                return f"http://127.0.0.1:{self.port}/admin/{self.controller.admin_token}"
+            port = get_free_port()
+            self._server = create_server(
+                create_admin_app(self.controller),
+                host=self.host,
+                port=port,
+                threads=8,
+            )
+            self.port = port
+            self._thread = threading.Thread(target=self._server.run, name="admin-server", daemon=True)
+            self._thread.start()
+        url = f"http://127.0.0.1:{port}/admin/{self.controller.admin_token}"
+        self.controller.admin_url = url
+        self.log(f"Panel admin local: {url}")
+        return url
+
+    def stop(self) -> None:
+        with self._lock:
+            server = self._server
+            thread = self._thread
+            self._server = None
+            self._thread = None
+            self.port = None
+        if server is not None:
+            with contextlib.suppress(Exception):
+                server.close()
+            dispatcher = getattr(server, "task_dispatcher", None)
+            if dispatcher is not None:
+                with contextlib.suppress(Exception):
+                    dispatcher.shutdown()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2)
+
+
+def needs_exit_confirmation(controller: AppController) -> bool:
+    return (
+        controller.web_server.running
+        or controller.tunnel.running
+        or bool(controller.transfers.snapshot_active())
+    )
+
+
+def run_integrated_admin_app() -> int:
+    try:
+        qt_core = importlib.import_module("PySide6.QtCore")
+        qt_gui = importlib.import_module("PySide6.QtGui")
+        qt_widgets = importlib.import_module("PySide6.QtWidgets")
+    except ImportError as exc:
+        raise RuntimeError("Falta PySide6. Ejecuta iniciar.bat o reinstala dependencias.") from exc
+
+    Qt = qt_core.Qt
+    QTimer = qt_core.QTimer
+    QAction = qt_gui.QAction
+    QTextCursor = qt_gui.QTextCursor
+    QApplication = qt_widgets.QApplication
+    QAbstractItemView = qt_widgets.QAbstractItemView
+    QCheckBox = qt_widgets.QCheckBox
+    QComboBox = qt_widgets.QComboBox
+    QFileDialog = qt_widgets.QFileDialog
+    QFormLayout = qt_widgets.QFormLayout
+    QGridLayout = qt_widgets.QGridLayout
+    QHBoxLayout = qt_widgets.QHBoxLayout
+    QInputDialog = qt_widgets.QInputDialog
+    QLabel = qt_widgets.QLabel
+    QLineEdit = qt_widgets.QLineEdit
+    QMainWindow = qt_widgets.QMainWindow
+    QMenu = qt_widgets.QMenu
+    QMessageBox = qt_widgets.QMessageBox
+    QPushButton = qt_widgets.QPushButton
+    QPlainTextEdit = qt_widgets.QPlainTextEdit
+    QSpinBox = qt_widgets.QSpinBox
+    QTabWidget = qt_widgets.QTabWidget
+    QTableWidget = qt_widgets.QTableWidget
+    QTableWidgetItem = qt_widgets.QTableWidgetItem
+    QVBoxLayout = qt_widgets.QVBoxLayout
+    QWidget = qt_widgets.QWidget
+
+    class AdminMainWindow(QMainWindow):
+        def __init__(self, controller: AppController) -> None:
+            super().__init__()
+            self.controller = controller
+            self._prefs_applied = False
+            self._last_log_dump = ""
+            self._labels = i18n_bundle(self.controller.ui_language)["qt"]
+            self.setWindowTitle(APP_NAME)
+            self.resize(1220, 780)
+            self.setMinimumSize(980, 640)
+            self._build_ui()
+            self._build_styles()
+            self._apply_language_texts()
+            self.timer = QTimer(self)
+            self.timer.setInterval(1500)
+            self.timer.timeout.connect(self.refresh_state)
+            self.timer.start()
+            self.refresh_state()
+
+        def _build_styles(self) -> None:
+            self.setStyleSheet(
+                """
+                QWidget { font-family: "Segoe UI"; font-size: 10pt; color: #1f2937; border-radius: 0; }
+                QMainWindow, QWidget#root { background: #f4f6f9; }
+                QTabWidget::pane { border: 1px solid #d2d9e3; background: #ffffff; top: -1px; }
+                QTabBar::tab {
+                    background: #eef2f7;
+                    border: 1px solid #d2d9e3;
+                    border-bottom: 0;
+                    padding: 6px 10px;
+                    margin-right: 1px;
+                }
+                QTabBar::tab:selected { background: #ffffff; }
+                QPushButton {
+                    background: #0b57d0;
+                    color: #ffffff;
+                    border: 1px solid #0b57d0;
+                    padding: 5px 10px;
+                    min-height: 30px;
+                    font-weight: 600;
+                }
+                QPushButton:hover { background: #0949b3; }
+                QPushButton#secondary {
+                    background: #ffffff;
+                    color: #1f2937;
+                    border: 1px solid #bcc6d4;
+                }
+                QPushButton#secondary:hover { background: #f4f7fb; }
+                QLineEdit, QComboBox, QSpinBox {
+                    background: #ffffff;
+                    border: 1px solid #bcc6d4;
+                    padding: 5px 7px;
+                    min-height: 30px;
+                }
+                QTableWidget {
+                    border: 1px solid #d2d9e3;
+                    background: #ffffff;
+                    gridline-color: #e7edf5;
+                }
+                QTableView::item { padding: 4px 6px; }
+                QHeaderView::section {
+                    background: #f5f8fc;
+                    border: 0;
+                    border-bottom: 1px solid #d2d9e3;
+                    padding: 5px 6px;
+                    font-weight: 600;
+                }
+                QPlainTextEdit {
+                    background: #0f172a;
+                    color: #dbe7ff;
+                    border: 1px solid #1e293b;
+                    padding: 6px;
+                }
+                QLabel#statusBadge {
+                    background: #e8f0fe;
+                    color: #0b57d0;
+                    border: 1px solid #c6d7ff;
+                    padding: 6px 10px;
+                    font-weight: 700;
+                }
+                QLabel#metricBadge {
+                    background: #f8fafc;
+                    border: 1px solid #d2d9e3;
+                    padding: 5px 9px;
+                    font-weight: 600;
+                }
+                """
+            )
+
+        def _t(self, key: str) -> str:
+            return self._labels.get(key, key)
+
+        def _apply_language_texts(self) -> None:
+            self._labels = i18n_bundle(self.controller.ui_language)["qt"]
+            self.language_label.setText(self._t("language_label"))
+            self.tabs.setTabText(self.tabs.indexOf(self.files_tab), self._t("tab_files"))
+            self.tabs.setTabText(self.tabs.indexOf(self.publish_tab), self._t("tab_publish"))
+            self.tabs.setTabText(self.tabs.indexOf(self.security_tab), self._t("tab_security"))
+            self.tabs.setTabText(self.tabs.indexOf(self.activity_tab), self._t("tab_activity"))
+
+            self.add_files_button.setText(self._t("btn_add_files"))
+            self.add_folder_button.setText(self._t("btn_add_folder"))
+            self.remove_files_button.setText(self._t("btn_remove_files"))
+            self.remove_folders_button.setText(self._t("btn_remove_folders"))
+            self.refresh_folders_button.setText(self._t("btn_refresh_folder"))
+            self.include_subfolders_check.setText(self._t("include_subfolders"))
+            self.file_table.setHorizontalHeaderLabels(
+                [
+                    self._t("files_name"),
+                    self._t("files_size"),
+                    self._t("files_source"),
+                    self._t("files_protected"),
+                    self._t("files_date"),
+                ]
+            )
+            self.folder_table.setHorizontalHeaderLabels(
+                [
+                    self._t("folders_name"),
+                    self._t("folders_count"),
+                    self._t("folders_size"),
+                    self._t("folders_protected"),
+                ]
+            )
+
+            current_mode = self.mode_combo.currentData()
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.clear()
+            mode_items = [
+                ("auto", self._t("mode_auto")),
+                ("tailscale", self._t("mode_tailscale")),
+                ("cloudflare", self._t("mode_cloudflare")),
+                ("direct", self._t("mode_direct")),
+            ]
+            for value, label in mode_items:
+                self.mode_combo.addItem(label, value)
+            mode_index = self.mode_combo.findData(current_mode or "auto")
+            self.mode_combo.setCurrentIndex(mode_index if mode_index >= 0 else 0)
+            self.mode_combo.blockSignals(False)
+
+            self.publish_mode_label.setText(self._t("publish_mode"))
+            self.publish_port_label.setText(self._t("publish_port"))
+            self.manual_port_check.setText(self._t("publish_manual_port"))
+            self.publish_tailscale_label.setText(self._t("publish_tailscale_port"))
+            self.upload_enabled_check.setText(self._t("publish_uploads"))
+            self.publish_upload_dir_label.setText(self._t("publish_upload_dir"))
+            self.choose_upload_dir_button.setText(self._t("btn_choose"))
+            self.start_button.setText(self._t("btn_publish"))
+            self.stop_button.setText(self._t("btn_stop"))
+            self.copy_button.setText(self._t("btn_copy_url"))
+
+            self.security_global_label.setText(self._t("security_global_password"))
+            self.security_selection_label.setText(self._t("security_selection_password"))
+            self.apply_global_button.setText(self._t("btn_apply_global"))
+            self.clear_global_button.setText(self._t("btn_clear_global"))
+            self.apply_file_button.setText(self._t("btn_apply_file_password"))
+            self.clear_file_button.setText(self._t("btn_clear_file_password"))
+            self.apply_folder_button.setText(self._t("btn_apply_folder_password"))
+            self.clear_folder_button.setText(self._t("btn_clear_folder_password"))
+            self.security_expire_label.setText(self._t("security_expire_minutes"))
+            self.security_download_label.setText(self._t("security_download_limit"))
+            self.uploads_require_global_check.setText(self._t("security_uploads_require_global"))
+            self.save_security_button.setText(self._t("btn_save_security"))
+            self.ip_edit.setPlaceholderText(self._t("ip_placeholder"))
+            self.block_ip_button.setText(self._t("btn_block_ip"))
+            self.unblock_ip_button.setText(self._t("btn_unblock_ip"))
+
+            self.cancel_button.setText(self._t("activity_cancel"))
+            self.export_button.setText(self._t("activity_export"))
+            self.active_table.setHorizontalHeaderLabels(
+                [
+                    self._t("activity_type"),
+                    self._t("activity_file"),
+                    self._t("activity_ip"),
+                    self._t("activity_progress"),
+                    self._t("activity_speed"),
+                    self._t("activity_status"),
+                ]
+            )
+            self.history_table.setHorizontalHeaderLabels(
+                [
+                    self._t("history_time"),
+                    self._t("history_type"),
+                    self._t("history_file"),
+                    self._t("history_status"),
+                    self._t("history_reason"),
+                    self._t("history_bytes"),
+                    self._t("history_ip"),
+                ]
+            )
+            self.log_title_label.setText(self._t("activity_log_title"))
+
+        def _build_ui(self) -> None:
+            root = QWidget(self)
+            root.setObjectName("root")
+            self.setCentralWidget(root)
+            layout = QVBoxLayout(root)
+            layout.setContentsMargins(10, 10, 10, 10)
+            layout.setSpacing(8)
+
+            header = QHBoxLayout()
+            header.setSpacing(8)
+            title_box = QVBoxLayout()
+            title = QLabel(APP_NAME)
+            title.setStyleSheet("font-size: 20px; font-weight: 700;")
+            self.recommendation_label = QLabel("")
+            self.recommendation_label.setStyleSheet("color: #5d6778;")
+            title_box.addWidget(title)
+            title_box.addWidget(self.recommendation_label)
+            header.addLayout(title_box, 1)
+
+            language_box = QHBoxLayout()
+            language_box.setSpacing(6)
+            self.language_label = QLabel("")
+            self.language_combo = QComboBox()
+            self.language_combo.addItem("English", "en")
+            self.language_combo.addItem("Espanol", "es")
+            language_box.addWidget(self.language_label)
+            language_box.addWidget(self.language_combo)
+            header.addLayout(language_box)
+
+            self.status_label = QLabel("")
+            self.status_label.setObjectName("statusBadge")
+            header.addWidget(self.status_label)
+            layout.addLayout(header)
+
+            self.tabs = QTabWidget()
+            layout.addWidget(self.tabs, 1)
+
+            self.files_tab = QWidget()
+            self.publish_tab = QWidget()
+            self.security_tab = QWidget()
+            self.activity_tab = QWidget()
+            self.tabs.addTab(self.files_tab, "")
+            self.tabs.addTab(self.publish_tab, "")
+            self.tabs.addTab(self.security_tab, "")
+            self.tabs.addTab(self.activity_tab, "")
+
+            self._build_files_tab()
+            self._build_publish_tab()
+            self._build_security_tab()
+            self._build_activity_tab()
+            self.language_combo.currentIndexChanged.connect(self.on_language_changed)
+
+        def _secondary_button(self, text: str) -> QPushButton:
+            button = QPushButton(text)
+            button.setObjectName("secondary")
+            return button
+
+        def _table(self, headers: list[str]) -> QTableWidget:
+            table = QTableWidget(0, len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.horizontalHeader().setStretchLastSection(True)
+            table.verticalHeader().setVisible(False)
+            table.verticalHeader().setDefaultSectionSize(28)
+            return table
+
+        def _selected_ids(self, table: QTableWidget) -> list[str]:
+            rows = sorted({index.row() for index in table.selectedIndexes()})
+            ids: list[str] = []
+            for row in rows:
+                item = table.item(row, 0)
+                if item:
+                    value = item.data(Qt.UserRole)
+                    if value:
+                        ids.append(str(value))
+            return ids
+
+        def _show_error(self, message: str) -> None:
+            QMessageBox.critical(self, APP_NAME, message)
+
+        def on_language_changed(self) -> None:
+            language = str(self.language_combo.currentData() or "en")
+            self.controller.set_ui_language(language, persist=True)
+            self._apply_language_texts()
+            self._prefs_applied = False
+            self.refresh_state()
+
+        def _build_files_tab(self) -> None:
+            layout = QVBoxLayout(self.files_tab)
+            layout.setSpacing(8)
+            layout.setContentsMargins(10, 10, 10, 10)
+
+            top_actions = QHBoxLayout()
+            self.add_files_button = QPushButton("")
+            self.add_files_button.clicked.connect(self.add_files_dialog)
+            self.add_folder_button = self._secondary_button("")
+            self.add_folder_button.clicked.connect(self.add_folder_dialog)
+            self.remove_files_button = self._secondary_button("")
+            self.remove_files_button.clicked.connect(self.remove_selected_files)
+            self.remove_folders_button = self._secondary_button("")
+            self.remove_folders_button.clicked.connect(self.remove_selected_folders)
+            self.refresh_folders_button = self._secondary_button("")
+            self.refresh_folders_button.clicked.connect(self.refresh_selected_folders)
+            top_actions.addWidget(self.add_files_button)
+            top_actions.addWidget(self.add_folder_button)
+            top_actions.addWidget(self.remove_files_button)
+            top_actions.addWidget(self.remove_folders_button)
+            top_actions.addWidget(self.refresh_folders_button)
+            top_actions.addStretch(1)
+            self.include_subfolders_check = QCheckBox("")
+            top_actions.addWidget(self.include_subfolders_check)
+            layout.addLayout(top_actions)
+
+            self.file_table = self._table(["", "", "", "", ""])
+            self.file_table.setMinimumHeight(240)
+            self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.file_table.customContextMenuRequested.connect(self.show_file_context_menu)
+            layout.addWidget(self.file_table, 2)
+
+            self.folder_table = self._table(["", "", "", ""])
+            self.folder_table.setMinimumHeight(160)
+            self.folder_table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.folder_table.customContextMenuRequested.connect(self.show_folder_context_menu)
+            layout.addWidget(self.folder_table, 1)
+
+        def _build_publish_tab(self) -> None:
+            layout = QVBoxLayout(self.publish_tab)
+            layout.setSpacing(8)
+            layout.setContentsMargins(10, 10, 10, 10)
+            self.publish_indicators_box = QHBoxLayout()
+            self.indicator_global = QLabel("")
+            self.indicator_upload_guard = QLabel("")
+            self.indicator_protected_files = QLabel("")
+            self.indicator_protected_folders = QLabel("")
+            for label in [
+                self.indicator_global,
+                self.indicator_upload_guard,
+                self.indicator_protected_files,
+                self.indicator_protected_folders,
+            ]:
+                label.setObjectName("metricBadge")
+                self.publish_indicators_box.addWidget(label)
+            self.publish_indicators_box.addStretch(1)
+            layout.addLayout(self.publish_indicators_box)
+
+            form = QFormLayout()
+            form.setVerticalSpacing(8)
+            self.mode_combo = QComboBox()
+            self.port_edit = QLineEdit("80")
+            self.manual_port_check = QCheckBox("")
+            self.tailscale_port_combo = QComboBox()
+            self.tailscale_port_combo.addItems(TAILSCALE_PUBLIC_PORTS)
+            self.upload_enabled_check = QCheckBox("")
+            self.upload_dir_edit = QLineEdit(str(DEFAULT_UPLOAD_DIR))
+            upload_dir_widget = QWidget()
+            upload_dir_row = QHBoxLayout(upload_dir_widget)
+            upload_dir_row.setContentsMargins(0, 0, 0, 0)
+            upload_dir_row.setSpacing(6)
+            upload_dir_row.addWidget(self.upload_dir_edit, 1)
+            self.choose_upload_dir_button = self._secondary_button("")
+            self.choose_upload_dir_button.clicked.connect(self.choose_upload_dir)
+            upload_dir_row.addWidget(self.choose_upload_dir_button)
+
+            self.publish_mode_label = QLabel("")
+            self.publish_port_label = QLabel("")
+            self.publish_tailscale_label = QLabel("")
+            self.publish_upload_dir_label = QLabel("")
+            form.addRow(self.publish_mode_label, self.mode_combo)
+            form.addRow(self.publish_port_label, self.port_edit)
+            form.addRow("", self.manual_port_check)
+            form.addRow(self.publish_tailscale_label, self.tailscale_port_combo)
+            form.addRow("", self.upload_enabled_check)
+            form.addRow(self.publish_upload_dir_label, upload_dir_widget)
+            layout.addLayout(form)
+
+            actions = QHBoxLayout()
+            self.start_button = QPushButton("")
+            self.start_button.clicked.connect(self.start_publish)
+            self.stop_button = self._secondary_button("")
+            self.stop_button.clicked.connect(self.stop_publish)
+            self.copy_button = self._secondary_button("")
+            self.copy_button.clicked.connect(self.copy_share_url)
+            actions.addWidget(self.start_button)
+            actions.addWidget(self.stop_button)
+            actions.addWidget(self.copy_button)
+            actions.addStretch(1)
+            layout.addLayout(actions)
+
+            self.share_url_edit = QLineEdit("")
+            self.share_url_edit.setReadOnly(True)
+            layout.addWidget(self.share_url_edit)
+            layout.addStretch(1)
+
+        def _build_security_tab(self) -> None:
+            layout = QVBoxLayout(self.security_tab)
+            layout.setSpacing(8)
+            layout.setContentsMargins(10, 10, 10, 10)
+            self.global_password_edit = QLineEdit()
+            self.global_password_edit.setEchoMode(QLineEdit.Password)
+            global_row = QHBoxLayout()
+            global_row.setSpacing(6)
+            global_row.addWidget(self.global_password_edit, 1)
+            self.apply_global_button = QPushButton("")
+            self.apply_global_button.clicked.connect(self.apply_global_password)
+            self.clear_global_button = self._secondary_button("")
+            self.clear_global_button.clicked.connect(self.clear_global_password)
+            global_row.addWidget(self.apply_global_button)
+            global_row.addWidget(self.clear_global_button)
+
+            self.selection_password_edit = QLineEdit()
+            self.selection_password_edit.setEchoMode(QLineEdit.Password)
+            file_row = QGridLayout()
+            file_row.setHorizontalSpacing(6)
+            file_row.setVerticalSpacing(6)
+            self.apply_file_button = QPushButton("")
+            self.apply_file_button.clicked.connect(self.apply_file_password)
+            self.clear_file_button = self._secondary_button("")
+            self.clear_file_button.clicked.connect(self.clear_file_password)
+            self.apply_folder_button = QPushButton("")
+            self.apply_folder_button.clicked.connect(self.apply_folder_password)
+            self.clear_folder_button = self._secondary_button("")
+            self.clear_folder_button.clicked.connect(self.clear_folder_password)
+            file_row.addWidget(self.apply_file_button, 0, 0)
+            file_row.addWidget(self.clear_file_button, 0, 1)
+            file_row.addWidget(self.apply_folder_button, 1, 0)
+            file_row.addWidget(self.clear_folder_button, 1, 1)
+
+            self.expiration_spin = QSpinBox()
+            self.expiration_spin.setRange(0, 525600)
+            self.download_limit_spin = QSpinBox()
+            self.download_limit_spin.setRange(0, 1_000_000)
+            self.uploads_require_global_check = QCheckBox("")
+            self.save_security_button = QPushButton("")
+            self.save_security_button.clicked.connect(self.save_security_options)
+
+            ip_row = QHBoxLayout()
+            self.ip_edit = QLineEdit()
+            self.block_ip_button = QPushButton("")
+            self.block_ip_button.clicked.connect(self.block_ip)
+            self.unblock_ip_button = self._secondary_button("")
+            self.unblock_ip_button.clicked.connect(self.unblock_ip)
+            ip_row.addWidget(self.ip_edit, 1)
+            ip_row.addWidget(self.block_ip_button)
+            ip_row.addWidget(self.unblock_ip_button)
+
+            self.security_global_label = QLabel("")
+            self.security_selection_label = QLabel("")
+            self.security_expire_label = QLabel("")
+            self.security_download_label = QLabel("")
+
+            layout.addWidget(self.security_global_label)
+            layout.addLayout(global_row)
+            layout.addWidget(self.security_selection_label)
+            layout.addWidget(self.selection_password_edit)
+            layout.addLayout(file_row)
+            layout.addWidget(self.security_expire_label)
+            layout.addWidget(self.expiration_spin)
+            layout.addWidget(self.security_download_label)
+            layout.addWidget(self.download_limit_spin)
+            layout.addWidget(self.uploads_require_global_check)
+            layout.addWidget(self.save_security_button)
+            layout.addLayout(ip_row)
+            self.security_summary = QLabel("")
+            self.security_summary.setStyleSheet("color: #5d6778;")
+            layout.addWidget(self.security_summary)
+            layout.addStretch(1)
+
+        def _build_activity_tab(self) -> None:
+            layout = QVBoxLayout(self.activity_tab)
+            layout.setSpacing(8)
+            layout.setContentsMargins(10, 10, 10, 10)
+            metrics = QHBoxLayout()
+            self.completed_label = QLabel("")
+            self.completed_label.setObjectName("metricBadge")
+            self.cancelled_label = QLabel("")
+            self.cancelled_label.setObjectName("metricBadge")
+            self.failed_label = QLabel("")
+            self.failed_label.setObjectName("metricBadge")
+            metrics.addWidget(self.completed_label)
+            metrics.addWidget(self.cancelled_label)
+            metrics.addWidget(self.failed_label)
+            metrics.addStretch(1)
+            layout.addLayout(metrics)
+
+            top = QHBoxLayout()
+            self.cancel_button = self._secondary_button("")
+            self.cancel_button.clicked.connect(self.cancel_selected_transfer)
+            self.export_button = self._secondary_button("")
+            self.export_button.clicked.connect(self.export_history_csv)
+            top.addWidget(self.cancel_button)
+            top.addWidget(self.export_button)
+            top.addStretch(1)
+            layout.addLayout(top)
+            self.active_table = self._table(["", "", "", "", "", ""])
+            self.active_table.setMinimumHeight(140)
+            self.history_table = self._table(["", "", "", "", "", "", ""])
+            layout.addWidget(self.active_table, 1)
+            layout.addWidget(self.history_table, 2)
+            self.log_title_label = QLabel("")
+            layout.addWidget(self.log_title_label)
+            self.log_text = QPlainTextEdit()
+            self.log_text.setReadOnly(True)
+            self.log_text.setMinimumHeight(130)
+            layout.addWidget(self.log_text)
+
+        def _prompt_password(self, title: str, label: str) -> str | None:
+            password, accepted = QInputDialog.getText(self, title, label, QLineEdit.Password)
+            if not accepted:
+                return None
+            return password
+
+        def _focus_row(self, table: QTableWidget, row: int) -> None:
+            if row >= 0:
+                table.selectRow(row)
+
+        def show_file_context_menu(self, pos) -> None:
+            item = self.file_table.itemAt(pos)
+            if item is None:
+                return
+            self._focus_row(self.file_table, item.row())
+            file_ids = self._selected_ids(self.file_table)
+            if not file_ids:
+                return
+
+            menu = QMenu(self)
+            remove_action = QAction(self._t("context_remove"), self)
+            protect_action = QAction(self._t("context_protect"), self)
+            unprotect_action = QAction(self._t("context_unprotect"), self)
+            open_action = QAction(self._t("context_open_location"), self)
+            copy_action = QAction(self._t("context_copy_link"), self)
+            menu.addAction(remove_action)
+            menu.addAction(protect_action)
+            menu.addAction(unprotect_action)
+            menu.addSeparator()
+            menu.addAction(open_action)
+            menu.addAction(copy_action)
+            chosen = menu.exec(self.file_table.viewport().mapToGlobal(pos))
+            if chosen is None:
+                return
+            if chosen is remove_action:
+                self.remove_selected_files()
+            elif chosen is protect_action:
+                password = self._prompt_password(self._t("password_prompt_title"), self._t("password_prompt_file"))
+                if password is not None:
+                    updated = self.controller.state.set_file_passwords(file_ids, password)
+                    self.controller.log(f"Password updated for {updated} file(s).")
+                    self.refresh_state()
+            elif chosen is unprotect_action:
+                updated = self.controller.state.set_file_passwords(file_ids, "")
+                self.controller.log(f"Password removed from {updated} file(s).")
+                self.refresh_state()
+            elif chosen is open_action:
+                self.controller.open_location(file_ids[0])
+            elif chosen is copy_action:
+                share_url = self.share_url_edit.text().strip()
+                if not share_url:
+                    self._show_error(self._t("error_no_url"))
+                    return
+                QApplication.clipboard().setText(f"{share_url.rstrip('/')}/download/{file_ids[0]}")
+                self.controller.log("Download link copied.")
+
+        def show_folder_context_menu(self, pos) -> None:
+            item = self.folder_table.itemAt(pos)
+            if item is None:
+                return
+            self._focus_row(self.folder_table, item.row())
+            folder_ids = self._selected_ids(self.folder_table)
+            if not folder_ids:
+                return
+
+            menu = QMenu(self)
+            remove_action = QAction(self._t("context_remove"), self)
+            protect_action = QAction(self._t("context_protect"), self)
+            unprotect_action = QAction(self._t("context_unprotect"), self)
+            refresh_action = QAction(self._t("context_refresh"), self)
+            open_action = QAction(self._t("context_open_location"), self)
+            menu.addAction(remove_action)
+            menu.addAction(protect_action)
+            menu.addAction(unprotect_action)
+            menu.addAction(refresh_action)
+            menu.addAction(open_action)
+            chosen = menu.exec(self.folder_table.viewport().mapToGlobal(pos))
+            if chosen is None:
+                return
+            if chosen is remove_action:
+                self.remove_selected_folders()
+            elif chosen is protect_action:
+                password = self._prompt_password(self._t("password_prompt_title"), self._t("password_prompt_folder"))
+                if password is not None:
+                    updated = self.controller.state.set_folder_passwords(folder_ids, password)
+                    self.controller.log(f"Password updated for {updated} folder(s).")
+                    self.refresh_state()
+            elif chosen is unprotect_action:
+                updated = self.controller.state.set_folder_passwords(folder_ids, "")
+                self.controller.log(f"Password removed from {updated} folder(s).")
+                self.refresh_state()
+            elif chosen is refresh_action:
+                self.refresh_selected_folders()
+            elif chosen is open_action:
+                self.controller.open_folder_location(folder_ids[0])
+
+        def add_files_dialog(self) -> None:
+            paths, _ = QFileDialog.getOpenFileNames(self, APP_NAME)
+            if not paths:
+                return
+            self.controller.add_files(paths)
+            self.refresh_state()
+
+        def add_folder_dialog(self) -> None:
+            path = QFileDialog.getExistingDirectory(self, APP_NAME)
+            if not path:
+                return
+            self.controller.add_folder(path, self.include_subfolders_check.isChecked())
+            self.refresh_state()
+
+        def remove_selected_files(self) -> None:
+            ids = self._selected_ids(self.file_table)
+            if not ids:
+                return
+            removed = self.controller.state.remove(ids)
+            self.controller.log(f"{removed} file(s) removed.")
+            self.refresh_state()
+
+        def remove_selected_folders(self) -> None:
+            ids = self._selected_ids(self.folder_table)
+            if not ids:
+                return
+            removed = 0
+            for folder_id in ids:
+                if self.controller.state.remove_folder(folder_id, True):
+                    removed += 1
+            self.controller.log(f"{removed} folder(s) removed.")
+            self.refresh_state()
+
+        def refresh_selected_folders(self) -> None:
+            ids = self._selected_ids(self.folder_table)
+            if not ids:
+                return
+            for folder_id in ids:
+                added, errors = self.controller.state.refresh_folder(folder_id)
+                self.controller.log(f"Folder refreshed: {added} new file(s).")
+                for error in errors:
+                    self.controller.log(error)
+            self.refresh_state()
+
+        def choose_upload_dir(self) -> None:
+            path = QFileDialog.getExistingDirectory(
+                self,
+                APP_NAME,
+                self.upload_dir_edit.text() or str(DEFAULT_UPLOAD_DIR),
+            )
+            if path:
+                self.upload_dir_edit.setText(path)
+
+        def _mode_value(self) -> str:
+            value = self.mode_combo.currentData()
+            return str(value or "auto")
+
+        def start_publish(self) -> None:
+            try:
+                self.controller.configure_uploads(
+                    self.upload_enabled_check.isChecked(),
+                    self.upload_dir_edit.text().strip() or str(DEFAULT_UPLOAD_DIR),
+                )
+            except Exception as exc:
+                self._show_error(str(exc))
+                return
+            result = self.controller.start_publish(
+                {
+                    "mode": self._mode_value(),
+                    "port": self.port_edit.text().strip() or "80",
+                    "manual_port": self.manual_port_check.isChecked(),
+                    "tailscale_public_port": self.tailscale_port_combo.currentText().strip() or "443",
+                }
+            )
+            if not result.get("ok"):
+                self._show_error(str(result.get("message") or "Unable to publish."))
+            self.refresh_state()
+
+        def stop_publish(self) -> None:
+            self.controller.stop_publish()
+            self.refresh_state()
+
+        def copy_share_url(self) -> None:
+            value = self.share_url_edit.text().strip()
+            if not value:
+                return
+            QApplication.clipboard().setText(value)
+            self.controller.log("Share URL copied.")
+            self.refresh_state()
+
+        def apply_global_password(self) -> None:
+            password = self.global_password_edit.text()
+            self.controller.state.set_global_password(password)
+            self.controller.log("Global password updated." if password else "Global password cleared.")
+            self.global_password_edit.clear()
+            self.refresh_state()
+
+        def clear_global_password(self) -> None:
+            self.controller.state.set_global_password("")
+            self.global_password_edit.clear()
+            self.controller.log("Global password cleared.")
+            self.refresh_state()
+
+        def apply_file_password(self) -> None:
+            ids = self._selected_ids(self.file_table)
+            if not ids:
+                self._show_error(self._t("error_select_file"))
+                return
+            updated = self.controller.state.set_file_passwords(ids, self.selection_password_edit.text())
+            self.controller.log(f"Password updated for {updated} file(s).")
+            self.selection_password_edit.clear()
+            self.refresh_state()
+
+        def clear_file_password(self) -> None:
+            ids = self._selected_ids(self.file_table)
+            if not ids:
+                return
+            updated = self.controller.state.set_file_passwords(ids, "")
+            self.controller.log(f"Password removed from {updated} file(s).")
+            self.refresh_state()
+
+        def apply_folder_password(self) -> None:
+            ids = self._selected_ids(self.folder_table)
+            if not ids:
+                self._show_error(self._t("error_select_folder"))
+                return
+            updated = self.controller.state.set_folder_passwords(ids, self.selection_password_edit.text())
+            self.controller.log(f"Password updated for {updated} folder(s).")
+            self.selection_password_edit.clear()
+            self.refresh_state()
+
+        def clear_folder_password(self) -> None:
+            ids = self._selected_ids(self.folder_table)
+            if not ids:
+                return
+            updated = self.controller.state.set_folder_passwords(ids, "")
+            self.controller.log(f"Password removed from {updated} folder(s).")
+            self.refresh_state()
+
+        def save_security_options(self) -> None:
+            self.controller.state.configure_security_options(
+                self.expiration_spin.value(),
+                self.download_limit_spin.value(),
+                self.uploads_require_global_check.isChecked(),
+            )
+            self.controller.log("Security options updated.")
+            self.refresh_state()
+
+        def block_ip(self) -> None:
+            ip = self.ip_edit.text().strip()
+            if not ip:
+                return
+            self.controller.state.block_ip(ip)
+            self.controller.log(f"Blocked IP: {ip}")
+            self.refresh_state()
+
+        def unblock_ip(self) -> None:
+            ip = self.ip_edit.text().strip()
+            if not ip:
+                return
+            self.controller.state.unblock_ip(ip)
+            self.controller.log(f"Unblocked IP: {ip}")
+            self.refresh_state()
+
+        def cancel_selected_transfer(self) -> None:
+            ids = self._selected_ids(self.active_table)
+            for transfer_id in ids:
+                if self.controller.transfers.cancel(transfer_id):
+                    self.controller.log(f"Transfer cancelled: {transfer_id}")
+            self.refresh_state()
+
+        def export_history_csv(self) -> None:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                APP_NAME,
+                str(Path.home() / "historial.csv"),
+                "CSV (*.csv)",
+            )
+            if not path:
+                return
+            self.controller.stats.export_csv(Path(path))
+            self.controller.log(f"History exported: {path}")
+            self.refresh_state()
+
+        def _set_row(self, table: QTableWidget, row: int, values: list[str], row_id: str = "") -> None:
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if col == 0 and row_id:
+                    item.setData(Qt.UserRole, row_id)
+                table.setItem(row, col, item)
+
+        def refresh_state(self) -> None:
+            state = self.controller.serialize()
+            if state.get("ui_language") != self.controller.ui_language:
+                self.controller.set_ui_language(str(state.get("ui_language") or "en"), persist=False)
+                self._apply_language_texts()
+
+            selected_language = str(state.get("ui_language") or self.controller.ui_language)
+            combo_index = self.language_combo.findData(selected_language)
+            if combo_index >= 0 and combo_index != self.language_combo.currentIndex():
+                self.language_combo.blockSignals(True)
+                self.language_combo.setCurrentIndex(combo_index)
+                self.language_combo.blockSignals(False)
+
+            self.status_label.setText(f"{self._t('status_prefix')}: {state['status']}")
+            self.recommendation_label.setText(state.get("recommendation", ""))
+            self.share_url_edit.setText(state.get("share_url", ""))
+
+            if not self._prefs_applied:
+                preferences = state.get("preferences", {})
+                mode = str(preferences.get("mode") or "auto")
+                index = self.mode_combo.findData(mode)
+                if index >= 0:
+                    self.mode_combo.setCurrentIndex(index)
+                self.port_edit.setText(str(preferences.get("port") or "80"))
+                self.manual_port_check.setChecked(bool(preferences.get("manual_port")))
+                tailscale_port = str(preferences.get("tailscale_public_port") or "443")
+                idx = self.tailscale_port_combo.findText(tailscale_port)
+                if idx >= 0:
+                    self.tailscale_port_combo.setCurrentIndex(idx)
+                self.upload_enabled_check.setChecked(bool(state.get("upload_enabled")))
+                self.upload_dir_edit.setText(str(state.get("upload_dir") or DEFAULT_UPLOAD_DIR))
+                self.include_subfolders_check.setChecked(bool(preferences.get("include_subfolders")))
+                preferred_language = normalize_ui_language(preferences.get("ui_language"))
+                language_index = self.language_combo.findData(preferred_language)
+                if language_index >= 0:
+                    self.language_combo.blockSignals(True)
+                    self.language_combo.setCurrentIndex(language_index)
+                    self.language_combo.blockSignals(False)
+                security = state.get("security", {})
+                self.expiration_spin.setValue(int(security.get("expiration_minutes") or 0))
+                self.download_limit_spin.setValue(int(security.get("download_limit_per_file") or 0))
+                self.uploads_require_global_check.setChecked(bool(security.get("uploads_require_global")))
+                self._prefs_applied = True
+
+            files = state.get("files", [])
+            self.file_table.setRowCount(len(files))
+            for row, item in enumerate(files):
+                self._set_row(
+                    self.file_table,
+                    row,
+                    [
+                        str(item.get("display_name", "")),
+                        str(item.get("size_text", "")),
+                        str(item.get("source", "")),
+                        self._t("protected_yes") if item.get("protected") else self._t("protected_no"),
+                        str(item.get("mtime_text", "")),
+                    ],
+                    str(item.get("id", "")),
+                )
+
+            folders = state.get("folders", [])
+            self.folder_table.setRowCount(len(folders))
+            for row, item in enumerate(folders):
+                self._set_row(
+                    self.folder_table,
+                    row,
+                    [
+                        str(item.get("name", "")),
+                        str(item.get("file_count", "")),
+                        str(item.get("total_size_text", "")),
+                        self._t("protected_yes") if item.get("protected") else self._t("protected_no"),
+                    ],
+                    str(item.get("id", "")),
+                )
+
+            active = state.get("active", [])
+            self.active_table.setRowCount(len(active))
+            for row, item in enumerate(active):
+                self._set_row(
+                    self.active_table,
+                    row,
+                    [
+                        localize_event_type(str(item.get("event_type", "")), self._labels, self.controller.ui_language),
+                        str(item.get("file_name", "")),
+                        str(item.get("ip", "")),
+                        f"{float(item.get('percent') or 0):.0f}%",
+                        f"{format_bytes(int(item.get('speed') or 0))}/s",
+                        localize_transfer_status(str(item.get("status", "")), self._labels),
+                    ],
+                    str(item.get("id", "")),
+                )
+
+            history = state.get("history", [])[:200]
+            self.history_table.setRowCount(len(history))
+            for row, item in enumerate(history):
+                self._set_row(
+                    self.history_table,
+                    row,
+                    [
+                        str(item.get("updated_at", "")),
+                        str(item.get("event_type_label", "")),
+                        str(item.get("file_name", "")),
+                        str(item.get("status_label", "")),
+                        str(item.get("reason_text", "")),
+                        str(item.get("bytes_text", "")),
+                        str(item.get("ip", "")),
+                    ],
+                    str(item.get("id", "")),
+                )
+
+            security = state.get("security", {})
+            blocked = security.get("blocked_ips", [])
+            blocked_text = ", ".join(blocked) if blocked else "-"
+            self.security_summary.setText(self._t("security_summary").format(ips=blocked_text))
+
+            indicators = state.get("security_indicators", {})
+            self.indicator_global.setText(
+                f"{self._t('indicator_global_password')}: "
+                f"{self._t('security_on') if indicators.get('global_password') else self._t('security_off')}"
+            )
+            self.indicator_upload_guard.setText(
+                f"{self._t('indicator_upload_guard')}: "
+                f"{self._t('security_on') if indicators.get('upload_guard') else self._t('security_off')}"
+            )
+            self.indicator_protected_files.setText(
+                f"{self._t('indicator_protected_files')}: {int(indicators.get('protected_files') or 0)}"
+            )
+            self.indicator_protected_folders.setText(
+                f"{self._t('indicator_protected_folders')}: {int(indicators.get('protected_folders') or 0)}"
+            )
+
+            completed = sum(1 for row in history if row.get("status_group") == "completed")
+            cancelled = sum(1 for row in history if row.get("status_group") == "cancelled")
+            failed = sum(1 for row in history if row.get("status_group") == "failed")
+            self.completed_label.setText(f"{self._t('activity_completed')}: {completed}")
+            self.cancelled_label.setText(f"{self._t('activity_cancelled')}: {cancelled}")
+            self.failed_label.setText(f"{self._t('activity_failed')}: {failed}")
+
+            log_dump = "\n".join(state.get("logs", []))
+            if log_dump != self._last_log_dump:
+                self.log_text.setPlainText(log_dump)
+                cursor = self.log_text.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                self.log_text.setTextCursor(cursor)
+                self._last_log_dump = log_dump
+
+        def closeEvent(self, event) -> None:
+            if needs_exit_confirmation(self.controller):
+                answer = QMessageBox.question(
+                    self,
+                    APP_NAME,
+                    self._t("exit_confirm"),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    event.ignore()
+                    return
+            self.controller.stop_publish()
+            event.accept()
+
+    qt_app = QApplication.instance() or QApplication(sys.argv[:1])
+    controller = AppController()
+    controller.log("Panel nativo Qt iniciado.")
+    window = AdminMainWindow(controller)
+    window.show()
+    try:
+        return int(qt_app.exec())
+    finally:
+        controller.stop_publish()
 
 
 BASE_AUTH_CSS = """
@@ -1743,21 +3626,380 @@ h1{margin:0 0 8px;font-size:1.6rem}p{color:#607080;line-height:1.45}input{width:
 button{width:100%;padding:12px;border:0;border-radius:8px;background:#0f8a7a;color:#fff;font-weight:760}.error{background:#ffe3df;border:1px solid #f3b2aa;color:#7b2016;padding:10px;border-radius:8px;margin:10px 0}
 """
 
+AUTH_CSS = BASE_AUTH_CSS
 
-@contextlib.contextmanager
-def inject_auth_css():
-    yield
+CLIENT_LOGIN_HTML = r"""
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ web.auth_title }}</title>
+  <style>{{ auth_css|default(AUTH_CSS)|safe }}</style>
+</head>
+<body>
+  <main class="auth">
+    <h1>{{ web.auth_title }}</h1>
+    <p>{{ web.auth_message }}</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('auth_global', token=token) }}">
+      <input name="password" type="password" placeholder="{{ web.auth_password_placeholder }}" autofocus>
+      <button type="submit">{{ web.auth_submit }}</button>
+    </form>
+  </main>
+</body>
+</html>
+"""
 
+FILE_PASSWORD_HTML = r"""
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ web.file_lock_title }}</title>
+  <style>{{ auth_css|default(AUTH_CSS)|safe }}</style>
+</head>
+<body>
+  <main class="auth">
+    <h1>{{ web.file_lock_title }}</h1>
+    <p>{{ web.file_lock_message }}</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('unlock_file', token=token, file_id=file_id) }}">
+      <input name="password" type="password" placeholder="{{ web.unlock_file_placeholder }}" autofocus>
+      <button type="submit">{{ web.file_lock_submit }}</button>
+    </form>
+  </main>
+</body>
+</html>
+"""
+
+FOLDER_PASSWORD_HTML = r"""
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ web.folders_title }}</title>
+  <style>{{ auth_css|default(AUTH_CSS)|safe }}</style>
+</head>
+<body>
+  <main class="auth">
+    <h1>{{ folder_name }}</h1>
+    <p>{{ web.folder_lock_message }}</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('unlock_folder', token=token, folder_id=folder_id) }}">
+      <input name="password" type="password" placeholder="{{ web.folder_password_placeholder }}" autofocus>
+      <button type="submit">{{ web.folder_lock_submit }}</button>
+    </form>
+  </main>
+</body>
+</html>
+"""
+
+CLIENT_HTML = r"""
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>File Transfer Easy</title>
+  <link rel="stylesheet" href="{{ url_for('client_css', token=token) }}">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">{{ web.session_title }}</p>
+        <h1>{{ web.shared_files_title }}</h1>
+        <p class="subtitle">{{ web.shared_files_subtitle }}</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><strong>{{ file_count }}</strong><span>{{ web.files_count }}</span></div>
+        <div class="stat"><strong>{{ total_size_text }}</strong><span>{{ web.total_size }}</span></div>
+      </div>
+    </header>
+    <section class="layout">
+      <div class="file-list">
+        {% if files %}
+          {% for item in files %}
+            <article class="file-card">
+              <div class="file-icon" aria-hidden="true">{{ item.display_name[:1].upper() or "F" }}</div>
+              <div class="file-title">
+                <a href="{{ url_for('download_file', token=token, file_id=item.id) }}">{{ item.display_name }}</a>
+                <div class="file-meta">
+                  <span>{{ item.size_text }}</span>
+                  <span>{{ item.source }}</span>
+                  {% if item.folder_name %}<span>{{ item.folder_name }}</span>{% endif %}
+                  <span>{{ item.mtime_text }}</span>
+                  {% if item.protected %}<span class="pill">{{ web.badge_protected }}</span>{% endif %}
+                </div>
+                {% if item.protected and item.id not in unlocked_files and item.folder_id not in unlocked_folders %}
+                  <form class="unlock" method="post" action="{{ url_for('unlock_file', token=token, file_id=item.id) }}">
+                    <input name="password" type="password" placeholder="{{ web.unlock_file_placeholder }}">
+                    <button type="submit">{{ web.file_lock_submit }}</button>
+                  </form>
+                {% endif %}
+              </div>
+              {% if not item.protected or item.id in unlocked_files or item.folder_id in unlocked_folders %}
+                <a class="download" href="{{ url_for('download_file', token=token, file_id=item.id) }}">{{ web.download_label }}</a>
+              {% endif %}
+            </article>
+          {% endfor %}
+        {% else %}
+          <div class="empty"><strong>{{ web.empty_title }}</strong><span>{{ web.empty_subtitle }}</span></div>
+        {% endif %}
+      </div>
+      <aside class="tool-panel">
+        <h2>{{ web.actions_title }}</h2>
+        <p>{{ web.actions_subtitle }}</p>
+        {% if files %}<a class="secondary" href="{{ url_for('download_all', token=token) }}">{{ web.download_zip_label }}</a>{% endif %}
+        {% if folders %}
+          <div class="folder-box">
+            <strong>{{ web.folders_title }}</strong>
+            {% for folder in folders %}
+              <div class="folder-line">
+                <span>{{ folder.name }}</span>
+                {% if folder.protected and folder.id not in unlocked_folders %}
+                  <form method="post" action="{{ url_for('unlock_folder', token=token, folder_id=folder.id) }}">
+                    <input name="password" type="password" placeholder="{{ web.folder_password_placeholder }}">
+                    <button type="submit">{{ web.folder_ok }}</button>
+                  </form>
+                {% else %}
+                  <small>{{ folder.file_count }} {{ web.folder_files }}</small>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        <div id="upload-disabled" class="notice" {% if upload_enabled %}hidden{% endif %}>{{ web.uploads_disabled }}</div>
+        <form class="upload-zone" id="upload-zone" {% if not upload_enabled %}hidden{% endif %}>
+          <strong>{{ web.upload_title }}</strong>
+          <p>{{ web.upload_help }}</p>
+          <input class="file-input" id="file-input" name="files" type="file" multiple>
+          <button class="upload-button" type="button" id="choose-files">{{ web.upload_choose }}</button>
+          <progress id="upload-progress" value="0" max="100" hidden></progress>
+          <div class="message" id="message"></div>
+        </form>
+      </aside>
+    </section>
+  </main>
+  <script>window.SHARE_TOKEN = {{ token|tojson }};</script>
+  <script>window.CLIENT_TEXT = {{ client_text|tojson }};</script>
+  <script src="{{ url_for('client_js', token=token) }}"></script>
+</body>
+</html>
+"""
+
+
+CLIENT_JS = r"""
+const token=window.SHARE_TOKEN;
+const text=window.CLIENT_TEXT||{};
+const zone=document.getElementById("upload-zone"),disabled=document.getElementById("upload-disabled"),input=document.getElementById("file-input"),button=document.getElementById("choose-files"),message=document.getElementById("message"),progress=document.getElementById("upload-progress");
+async function refreshStatus(){const r=await fetch(`/s/${token}/status`,{cache:"no-store"});if(!r.ok)return;const s=await r.json();if(zone)zone.hidden=!s.upload_enabled;if(disabled)disabled.hidden=s.upload_enabled}
+async function uploadFiles(files){await refreshStatus();if(zone&&zone.hidden){if(message)message.textContent=text.upload_msg_disabled||"";return}if(!files||files.length===0)return;const f=new FormData();for(const file of files)f.append("files",file);if(progress){progress.hidden=false;progress.value=15}if(message)message.textContent=text.upload_msg_sending||"";try{const r=await fetch(`/s/${token}/upload`,{method:"POST",body:f,cache:"no-store"});if(progress)progress.value=100;const d=await r.json();if(message)message.textContent=d.message||text.upload_msg_done||"";if(r.ok)setTimeout(()=>window.location.reload(),800)}catch{if(message)message.textContent=text.upload_msg_failed||""}finally{if(input)input.value="";setTimeout(()=>{if(progress){progress.hidden=true;progress.value=0}},900)}}
+if(zone&&input&&button){button.addEventListener("click",()=>input.click());input.addEventListener("change",()=>uploadFiles(input.files));["dragenter","dragover"].forEach(n=>zone.addEventListener(n,e=>{e.preventDefault();zone.classList.add("drag")}));["dragleave","drop"].forEach(n=>zone.addEventListener(n,e=>{e.preventDefault();zone.classList.remove("drag")}));zone.addEventListener("drop",e=>uploadFiles(e.dataTransfer.files))}
+refreshStatus();setInterval(refreshStatus,2500);
+"""
+
+
+
+
+
+CLIENT_CSS = r"""
+:root{--ink:#17212b;--muted:#607080;--line:rgba(255,255,255,.58);--glass:rgba(255,255,255,.66);--teal:#0f8a7a;--teal-dark:#0a655c;--coral:#ec6d5f;--shadow:0 24px 70px rgba(31,48,62,.15)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(135deg,#f4faf8 0%,#e9f1f5 48%,#f7f2ef 100%);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;letter-spacing:0}body:before{content:"";position:fixed;inset:0;background:linear-gradient(120deg,rgba(15,138,122,.12),transparent 42%,rgba(236,109,95,.12));pointer-events:none}.shell{position:relative;z-index:1;width:min(1120px,calc(100% - 32px));margin:0 auto;padding:30px 0 38px}.topbar{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:end;padding:18px;margin-bottom:18px;border-radius:8px;background:var(--glass);border:1px solid var(--line);box-shadow:var(--shadow);backdrop-filter:blur(24px)}.eyebrow{color:var(--teal-dark);font-weight:780;margin:0 0 8px}h1{margin:0;font-size:2rem;line-height:1.1}.subtitle{margin:10px 0 0;color:var(--muted);line-height:1.5}.stats{display:flex;gap:10px}.stat,.file-card,.tool-panel,.empty{background:var(--glass);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);backdrop-filter:blur(24px)}.stat{min-width:112px;padding:12px 14px}.stat strong{display:block;font-size:1.2rem}.stat span{color:var(--muted);font-size:.85rem}.layout{display:grid;grid-template-columns:minmax(0,1fr)340px;gap:18px;align-items:start}.file-list{display:grid;gap:10px}.file-card{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px}.file-icon{width:44px;height:44px;border-radius:8px;background:linear-gradient(145deg,#d8f3ea,#fff);color:var(--teal-dark);display:grid;place-items:center;font-weight:900;border:1px solid rgba(15,138,122,.18)}.file-title{min-width:0}.file-title a{color:var(--ink);text-decoration:none;font-weight:780;overflow-wrap:anywhere}.file-meta{color:var(--muted);display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:6px;font-size:.92rem}.pill{color:#7b2016;background:#ffe3df;border-radius:999px;padding:1px 8px}.download,.upload-button{border:1px solid rgba(255,255,255,.55);border-radius:8px;color:#fff;background:linear-gradient(180deg,var(--teal),var(--teal-dark));padding:11px 14px;min-width:112px;cursor:pointer;font-weight:760;text-decoration:none;text-align:center;box-shadow:0 10px 26px rgba(15,138,122,.2)}.download:hover,.upload-button:hover{filter:brightness(1.03)}.tool-panel{padding:18px;position:sticky;top:16px}.tool-panel h2{margin:0;font-size:1.15rem}.tool-panel p{margin:8px 0 0;color:var(--muted);line-height:1.45}.secondary{display:block;text-align:center;border:1px solid rgba(23,33,43,.1);color:var(--ink);background:rgba(255,255,255,.56);border-radius:8px;padding:11px 14px;text-decoration:none;font-weight:720;margin-top:12px}.folder-box{margin-top:18px;display:grid;gap:10px}.folder-line{border:1px solid rgba(23,33,43,.08);background:rgba(255,255,255,.5);border-radius:8px;padding:10px}.folder-line form{display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:8px}.folder-line input,.unlock input{width:100%;padding:10px;border:1px solid rgba(23,33,43,.12);border-radius:8px;background:rgba(255,255,255,.72)}.folder-line button,.unlock button{border:0;border-radius:8px;background:var(--ink);color:#fff;padding:10px;font-weight:750}.upload-zone{margin-top:18px;border:2px dashed rgba(15,138,122,.35);background:rgba(244,251,249,.68);border-radius:8px;padding:18px;text-align:center}.upload-zone.drag{border-color:var(--coral);background:#fff3f1}.file-input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.notice,.unlock{margin-top:12px;padding:12px;border-radius:8px;background:rgba(255,248,223,.8);color:#684a08;border:1px solid #efd997;font-size:.94rem}.message{min-height:22px;margin-top:12px;color:var(--muted);font-size:.94rem}progress{width:100%;margin-top:12px;accent-color:var(--teal)}.empty{min-height:260px;display:grid;place-items:center;text-align:center;padding:28px}.empty span{color:var(--muted);margin-top:8px;display:block}@media(max-width:860px){.topbar,.layout{grid-template-columns:1fr}.tool-panel{position:static}}@media(max-width:620px){.shell{width:min(100% - 20px,1120px);padding-top:18px}h1{font-size:1.55rem}.file-card{grid-template-columns:40px minmax(0,1fr)}.download{grid-column:1/-1;width:100%}.stats{flex-direction:column}}
+"""
+
+ADMIN_HTML = r"""
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }} Admin</title>
+  <link rel="stylesheet" href="{{ url_for('admin_css', token=token) }}">
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div>
+        <p class="eyebrow">Asistente de publicacion</p>
+        <h1>Comparte archivos en 4 pasos</h1>
+        <p id="recommendation">Empieza anadiendo archivos o una carpeta.</p>
+      </div>
+      <div class="top-actions">
+        <button data-action="start" class="primary">Publicar ahora</button>
+        <button data-action="stop" class="secondary">Detener</button>
+      </div>
+    </header>
+
+    <section class="status-strip">
+      <div><span>Estado</span><strong id="status">Preparado</strong></div>
+      <div><span>Archivos</span><strong id="file-count">0</strong></div>
+      <div><span>Total</span><strong id="total-size">0 B</strong></div>
+      <div><span>Subidas</span><strong id="upload-state">No</strong></div>
+      <div><span>Descargas</span><strong id="active-count">0</strong></div>
+    </section>
+
+    <nav class="steps" aria-label="Pasos del asistente">
+      <button class="step active" data-nav="step-files"><b>1</b><span>Que compartir</span></button>
+      <button class="step" data-nav="step-access"><b>2</b><span>Acceso</span></button>
+      <button class="step" data-nav="step-publish"><b>3</b><span>Publicar</span></button>
+      <button class="step" data-nav="step-ready"><b>4</b><span>Listo</span></button>
+    </nav>
+
+    <section class="card wizard-panel active" id="step-files" data-section="step-files">
+      <div class="section-head">
+        <div><h2>Que quieres compartir?</h2><p>Anade archivos sueltos o una carpeta. Puedes quitar elementos desde la lista.</p></div>
+        <div class="button-row">
+          <button data-action="pick-files">Anadir archivos</button>
+          <button data-action="pick-folder" class="secondary">Anadir carpeta</button>
+        </div>
+      </div>
+      <label class="inline-check"><input id="include-subfolders" type="checkbox"> Incluir subcarpetas al anadir carpetas</label>
+      <input id="file-search" class="search" placeholder="Buscar en archivos compartidos">
+      <div id="files-list" class="item-list"></div>
+      <div id="folders-list" class="item-list compact"></div>
+    </section>
+
+    <section class="card wizard-panel" id="step-access" data-section="step-access">
+      <div class="section-head"><div><h2>Quien puede acceder?</h2><p>El enlace ya lleva token privado. Activa solo lo que necesites.</p></div></div>
+      <div class="two-col">
+        <div class="option-box">
+          <h3>Contrasena global</h3>
+          <p>Se pedira al abrir la pagina publica. No se guarda en configuracion.</p>
+          <input id="global-password" type="password" placeholder="Nueva contrasena global">
+          <div class="button-row"><button data-action="set-global">Aplicar</button><button data-action="clear-global" class="secondary">Quitar</button></div>
+        </div>
+        <div class="option-box">
+          <h3>Subidas de clientes</h3>
+          <label class="inline-check"><input id="upload-enabled" type="checkbox"> Permitir que suban archivos</label>
+          <input id="upload-dir" placeholder="Carpeta donde guardar subidas">
+          <button data-action="save-uploads">Guardar subidas</button>
+        </div>
+      </div>
+      <details class="advanced">
+        <summary>Seguridad avanzada</summary>
+        <div class="three-col">
+          <label>Clave para seleccion <input id="selection-password" type="password"></label>
+          <button data-action="set-file-password">Clave archivo</button>
+          <button data-action="set-folder-password">Clave carpeta</button>
+          <button data-action="clear-file-password" class="secondary">Quitar clave archivo</button>
+          <button data-action="clear-folder-password" class="secondary">Quitar clave carpeta</button>
+          <label>Expirar enlace en minutos <input id="expiration-minutes" type="number" min="0" placeholder="0 = nunca"></label>
+          <label>Limite por archivo <input id="download-limit" type="number" min="0" placeholder="0 = sin limite"></label>
+          <label class="inline-check"><input id="uploads-require-global" type="checkbox"> Subidas requieren contrasena global</label>
+          <button data-action="save-security">Guardar reglas</button>
+          <label>IP <input id="ip-input" placeholder="1.2.3.4"></label>
+          <button data-action="block-ip">Bloquear IP</button>
+          <button data-action="unblock-ip" class="secondary">Desbloquear IP</button>
+        </div>
+        <p id="security-summary" class="muted"></p>
+      </details>
+    </section>
+
+    <section class="card wizard-panel" id="step-publish" data-section="step-publish">
+      <div class="section-head"><div><h2>Como lo publicamos?</h2><p>Automatico intenta Tailscale, despues Cloudflare y finalmente una URL LAN/local.</p></div></div>
+      <div class="publish-choice">
+        <label><input type="radio" name="mode-choice" value="auto" checked><span>Automatico recomendado</span><small>Tailscale -> Cloudflare -> puerto propio</small></label>
+        <label><input type="radio" name="mode-choice" value="cloudflare"><span>Cloudflare rapido</span><small>Quick Tunnel temporal</small></label>
+        <label><input type="radio" name="mode-choice" value="direct"><span>Puerto propio</span><small>Usa LAN/router/firewall del host</small></label>
+      </div>
+      <details class="advanced">
+        <summary>Publicacion avanzada</summary>
+        <div class="three-col">
+          <label>Modo manual <select id="mode"><option value="auto">Automatico</option><option value="tailscale">Tailscale Funnel</option><option value="cloudflare">Cloudflare Quick Tunnel</option><option value="direct">Puerto propio</option></select></label>
+          <label>Puerto local <input id="port" value="80"></label>
+          <label>Puerto publico Tailscale <select id="tailscale-port"><option>443</option><option>8443</option><option>10000</option></select></label>
+          <label class="inline-check"><input id="manual-port" type="checkbox"> Usar exactamente este puerto</label>
+        </div>
+      </details>
+      <label class="save-box"><input id="save-preferences" type="checkbox"> Guardar esta configuracion y no preguntarme la proxima vez</label>
+      <div class="button-row"><button data-action="start" class="primary big">Publicar ahora</button><button data-action="delete-preferences" class="secondary">Borrar configuracion guardada</button></div>
+      <p id="preferences-message" class="muted"></p>
+    </section>
+
+    <section class="card wizard-panel" id="step-ready" data-section="step-ready">
+      <div class="section-head"><div><h2>Enlace listo</h2><p>Copia esta URL para compartir los archivos. El panel admin sigue siendo solo local.</p></div></div>
+      <div class="url-card">
+        <input id="share-url" readonly placeholder="La URL aparecera aqui al publicar">
+        <button id="copy-url" type="button">Copiar URL</button>
+        <button id="open-client" type="button" class="secondary">Previsualizar</button>
+      </div>
+      <div class="two-col">
+        <div class="option-box"><h3>Descargas activas</h3><div id="active-list" class="item-list compact"></div></div>
+        <div class="option-box"><h3>Historial reciente</h3><a id="export-history" class="text-link" href="#">Exportar CSV</a><div id="history-list" class="item-list compact"></div></div>
+      </div>
+      <details class="advanced">
+        <summary>Logs</summary>
+        <pre id="logs"></pre>
+      </details>
+    </section>
+  </main>
+
+  <section id="client-preview" class="preview" hidden>
+    <div class="preview-card">
+      <div class="section-head"><div><h2>Previsualizacion cliente</h2><p>Vista integrada de la pagina publica.</p></div><button id="close-preview" class="secondary">Cerrar</button></div>
+      <iframe id="preview-frame" title="Vista cliente"></iframe>
+    </div>
+  </section>
+  <div id="context-menu" class="context-menu" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  <script>window.ADMIN_TOKEN = {{ token|tojson }};</script>
+  <script src="{{ url_for('admin_js', token=token) }}"></script>
+</body>
+</html>
+"""
+
+ADMIN_CSS = r"""
+:root{--bg:#f3f5f8;--surface:#fff;--surface-alt:#f9fbfe;--ink:#1b1f24;--muted:#5d6778;--line:#d7dde7;--line-strong:#c7ceda;--accent:#0b57d0;--accent-hover:#0847ab;--accent-soft:#e8f0fe;--warn:#fff6d9;--danger:#fde7e9;--danger-ink:#8a2f36;--shadow:0 10px 24px rgba(20,31,53,.08)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;letter-spacing:0}button,input,select{font:inherit;letter-spacing:0}button{border:1px solid transparent;border-radius:4px;background:var(--accent);color:#fff;padding:10px 14px;font-weight:700;cursor:pointer;min-height:40px}button:hover{background:var(--accent-hover)}button.secondary{background:#fff;color:var(--ink);border-color:var(--line-strong)}button.secondary:hover{background:var(--surface-alt)}button.big{font-size:1.02rem;padding:12px 18px}input,select{width:100%;border:1px solid var(--line-strong);border-radius:4px;padding:10px 12px;background:#fff;color:var(--ink)}label{display:grid;gap:7px;color:var(--muted);font-size:.92rem}.shell{width:min(1220px,calc(100% - 28px));margin:0 auto;padding:20px 0 32px}.top,.card,.status-strip,.steps{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}.top{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:18px;margin-bottom:12px}.top h1{margin:0;font-size:1.82rem;line-height:1.15}.top p{margin:6px 0 0;color:var(--muted)}.eyebrow{margin:0 0 6px;color:var(--accent);font-weight:760}.top-actions,.button-row,.url-card{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.status-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin-bottom:12px;overflow:hidden}.status-strip div{padding:12px 14px;border-right:1px solid var(--line)}.status-strip div:last-child{border-right:0}.status-strip span{display:block;color:var(--muted);font-size:.82rem}.status-strip strong{display:block;margin-top:4px}.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-bottom:14px;overflow:hidden}.step{background:#fff;color:var(--ink);border-radius:0;border-right:1px solid var(--line);justify-content:flex-start;display:flex;gap:10px;align-items:center;box-shadow:none}.step:last-child{border-right:0}.step b{width:28px;height:28px;border-radius:999px;background:var(--surface-alt);display:grid;place-items:center}.step.active{background:var(--accent-soft);color:var(--accent)}.step.active b{background:var(--accent);color:#fff}.wizard-panel{display:none;padding:18px;margin-bottom:14px}.wizard-panel.active{display:block}.section-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.section-head h2{margin:0;font-size:1.4rem}.section-head h3,.option-box h3{margin:0 0 8px}.section-head p,.option-box p,.muted{color:var(--muted);margin:6px 0 0}.two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.three-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end}.option-box{border:1px solid var(--line);border-radius:8px;background:var(--surface-alt);padding:14px;display:grid;gap:10px}.inline-check,.save-box{display:flex;align-items:center;gap:9px;color:var(--ink);font-weight:620}.inline-check input,.save-box input{width:auto}.save-box{margin:14px 0;padding:12px;background:var(--warn);border:1px solid #e9d58f;border-radius:8px}.search{margin:12px 0}.item-list{display:grid;gap:8px}.item-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;background:#fff;padding:11px}.item-row.selected{border-color:var(--accent);background:var(--accent-soft)}.item-row strong{display:block;overflow-wrap:anywhere}.item-row small{display:block;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.row-actions{display:flex;gap:6px;flex-wrap:wrap}.row-actions button{min-height:34px;padding:7px 10px;font-size:.9rem}.compact{max-height:310px;overflow:auto}.publish-choice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.publish-choice label{border:1px solid var(--line);background:#fff;border-radius:8px;padding:14px;cursor:pointer;color:var(--ink)}.publish-choice input{width:auto;margin-right:8px}.publish-choice span{font-weight:760}.publish-choice small{display:block;color:var(--muted);margin-top:6px}.advanced{margin-top:16px;border:1px solid var(--line);border-radius:8px;background:var(--surface-alt);padding:12px}.advanced summary{cursor:pointer;font-weight:760}.advanced>div,.advanced pre{margin-top:12px}.url-card{background:var(--accent-soft);border:1px solid #cfdcff;border-radius:8px;padding:14px}.url-card input{flex:1;min-width:280px;font-weight:700}pre{margin:0;min-height:220px;max-height:360px;overflow:auto;background:#111827;color:#e6ecfa;padding:12px;border-radius:8px;white-space:pre-wrap}.text-link{color:var(--accent);font-weight:700}.pill{border-radius:999px;padding:2px 8px;background:var(--surface-alt);font-size:.82rem}.pill.danger{background:var(--danger);color:var(--danger-ink)}.preview{position:fixed;inset:0;z-index:20;background:rgba(20,24,33,.48);padding:24px}.preview-card{height:100%;display:grid;grid-template-rows:auto 1fr;background:#fff;border-radius:8px;padding:14px}.preview iframe{width:100%;height:100%;border:1px solid var(--line);border-radius:8px}.toast{position:fixed;right:22px;bottom:22px;z-index:30;background:#1e2430;color:#fff;border-radius:8px;padding:12px 14px;box-shadow:0 14px 34px rgba(13,18,28,.3)}.context-menu{position:fixed;z-index:25;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 16px 34px rgba(20,31,53,.17);min-width:210px;padding:6px}.context-menu button{width:100%;justify-content:flex-start;background:transparent;color:var(--ink);border:0;font-weight:600}.context-menu button:hover{background:var(--surface-alt)}@media(max-width:900px){.top,.section-head{flex-direction:column}.status-strip,.steps,.two-col,.three-col,.publish-choice{grid-template-columns:1fr}.status-strip div,.step{border-right:0;border-bottom:1px solid var(--line)}}@media(max-width:620px){.shell{width:min(100% - 18px,1220px);padding-top:12px}.top h1{font-size:1.38rem}.top-actions,.button-row,.url-card{display:grid}.item-row{grid-template-columns:1fr}}
+"""
+
+ADMIN_JS = r"""
+const token=window.ADMIN_TOKEN;
+const apiBase=`/admin/${token}/api`;
+let state=null,selectedFiles=new Set(),selectedFolders=new Set(),contextTarget=null,currentStep="step-files",initialPreferencesApplied=false;
+const $=id=>document.getElementById(id);
+async function api(path,options={}){const r=await fetch(`${apiBase}${path}`,{headers:{"Content-Type":"application/json",...(options.headers||{})},cache:"no-store",...options});const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch{d={message:t}}if(!r.ok||d.ok===false)throw new Error(d.message||t||"Error");return d}
+function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function formatBytes(size){let v=Number(size||0);for(const u of["B","KB","MB","GB","TB"]){if(v<1024||u==="TB")return u==="B"?`${Math.round(v)} ${u}`:`${v.toFixed(1)} ${u}`;v/=1024}}
+function notify(message){const t=$("toast");t.textContent=message;t.hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>t.hidden=true,2600)}
+function showStep(id){currentStep=id;document.querySelectorAll("[data-section]").forEach(s=>s.classList.toggle("active",s.dataset.section===id));document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===id))}
+function selectedFileIds(){return Array.from(selectedFiles)}
+function selectedFolderIds(){return Array.from(selectedFolders)}
+async function refresh(){state=await api("/state",{method:"GET"});render()}
+function render(){if(!state)return;$("status").textContent=state.status;$("file-count").textContent=state.file_count;$("total-size").textContent=state.total_size_text;$("upload-state").textContent=state.upload_enabled?"Si":"No";$("active-count").textContent=state.active.length;$("recommendation").textContent=state.recommendation||"";$("share-url").value=state.share_url||"";$("logs").textContent=state.logs.join("\n");$("export-history").href=`${apiBase}/history/export`;$("expiration-minutes").placeholder=state.security.expires_at_text?`Expira: ${state.security.expires_at_text}`:"0 = nunca";$("security-summary").textContent=`IPs bloqueadas: ${(state.security.blocked_ips||[]).join(", ")||"ninguna"}`;if(!initialPreferencesApplied){$("upload-enabled").checked=!!state.upload_enabled;$("upload-dir").value=state.upload_dir||"";$("save-preferences").checked=!!state.preferences_saved;$("download-limit").value=state.security.download_limit_per_file||"";$("uploads-require-global").checked=!!state.security.uploads_require_global;applyPreferencesToInputs();initialPreferencesApplied=true}renderFiles();renderFolders();renderActive();renderHistory();if(state.wizard_step===4)showStep("step-ready");}
+function applyPreferencesToInputs(){const p=state.preferences||{};$("mode").value=p.mode||"auto";$("port").value=p.port||"80";$("manual-port").checked=!!p.manual_port;$("tailscale-port").value=p.tailscale_public_port||"443";$("include-subfolders").checked=!!p.include_subfolders;document.querySelectorAll("input[name='mode-choice']").forEach(r=>r.checked=r.value===($("mode").value||"auto"))}
+function renderFiles(){const list=$("files-list"),q=$("file-search").value.trim().toLowerCase();list.innerHTML="";const files=(state.files||[]).filter(f=>!q||f.display_name.toLowerCase().includes(q));if(!files.length){list.innerHTML="<div class='item-row'><div><strong>No hay archivos todavia</strong><small>Anade archivos o una carpeta para empezar.</small></div></div>";return}for(const f of files){const row=document.createElement("div");row.className=`item-row ${selectedFiles.has(f.id)?"selected":""}`;row.innerHTML=`<div><strong>${escapeHtml(f.display_name)}</strong><small>${f.size_text} - ${escapeHtml(f.source)} ${f.protected?"- protegido":""}</small><small>${escapeHtml(f.path)}</small></div><div class="row-actions"><button data-file-action="select" data-id="${f.id}" class="secondary">${selectedFiles.has(f.id)?"Seleccionado":"Seleccionar"}</button><button data-file-action="copy" data-id="${f.id}" class="secondary">Copiar enlace</button><button data-file-action="open" data-id="${f.id}" class="secondary">Ubicacion</button><button data-file-action="remove" data-id="${f.id}" class="secondary">Quitar</button></div>`;row.addEventListener("contextmenu",e=>showContext(e,"file",f.id));list.appendChild(row)}}
+function renderFolders(){const list=$("folders-list");list.innerHTML="";for(const f of state.folders||[]){const row=document.createElement("div");row.className=`item-row ${selectedFolders.has(f.id)?"selected":""}`;row.innerHTML=`<div><strong>${escapeHtml(f.name)}</strong><small>${f.file_count} archivos - ${f.total_size_text}${f.protected?" - protegida":""}</small><small>${escapeHtml(f.path)}</small></div><div class="row-actions"><button data-folder-action="select" data-id="${f.id}" class="secondary">${selectedFolders.has(f.id)?"Seleccionada":"Seleccionar"}</button><button data-folder-action="refresh" data-id="${f.id}" class="secondary">Actualizar</button><button data-folder-action="remove" data-id="${f.id}" class="secondary">Quitar</button></div>`;row.addEventListener("contextmenu",e=>showContext(e,"folder",f.id));list.appendChild(row)}}
+function renderActive(){const list=$("active-list");list.innerHTML="";for(const a of state.active||[]){const row=document.createElement("div");row.className="item-row";row.innerHTML=`<div><strong>${escapeHtml(a.file_name)}</strong><small>${escapeHtml(a.ip)} - ${a.percent.toFixed(0)}% - ${formatBytes(a.speed)}/s</small></div><div class="row-actions"><button data-transfer-action="cancel" data-id="${a.id}" class="secondary">Anular</button></div>`;list.appendChild(row)}if(!state.active.length)list.innerHTML="<p class='muted'>No hay descargas activas.</p>"}
+function renderHistory(){const list=$("history-list");list.innerHTML="";for(const row of (state.history||[]).slice(0,40)){const div=document.createElement("div");div.className="item-row";div.innerHTML=`<div><strong>${escapeHtml(row.file_name||"-")}</strong><small>${row.updated_at} - ${row.event_type} - ${row.ip} - ${row.status}</small></div>`;list.appendChild(div)}}
+function currentPreferences(){const mode=$("mode").value||document.querySelector("input[name='mode-choice']:checked")?.value||"auto";return{save_preferences:$("save-preferences").checked,mode,port:$("port").value,manual_port:$("manual-port").checked,tailscale_public_port:$("tailscale-port").value,upload_enabled:$("upload-enabled").checked,upload_dir:$("upload-dir").value,include_subfolders:$("include-subfolders").checked,file_paths:(state.files||[]).map(f=>f.path),folders:(state.folders||[]).map(f=>({path:f.path,include_subfolders:f.include_subfolders})),expiration_minutes:$("expiration-minutes").value,download_limit_per_file:$("download-limit").value,uploads_require_global:$("uploads-require-global").checked}}
+async function savePreferenceChoice(prefs=currentPreferences()){if(prefs.save_preferences){await api("/preferences",{method:"POST",body:JSON.stringify(prefs)});$("preferences-message").textContent="Configuracion guardada."}else{await api("/preferences",{method:"DELETE"});$("preferences-message").textContent="La app preguntara cada vez."}}
+async function copyText(value){if(!value){notify("No hay URL todavia.");return}try{await navigator.clipboard.writeText(value);notify("Copiado al portapapeles.")}catch{$("share-url").select();document.execCommand("copy");notify("Copiado al portapapeles.")}}
+async function action(name){try{if(name==="pick-files"){await api("/files/pick",{method:"POST",body:"{}"});showStep("step-files")}if(name==="pick-folder"){await api("/folders/pick",{method:"POST",body:JSON.stringify({include_subfolders:$("include-subfolders").checked})});showStep("step-files")}if(name==="save-uploads")await api("/uploads",{method:"POST",body:JSON.stringify({enabled:$("upload-enabled").checked,upload_dir:$("upload-dir").value})});if(name==="start"){if(!state?.has_files){showStep("step-files");notify("Anade algun archivo antes de publicar.");return}const prefs=currentPreferences();await api("/uploads",{method:"POST",body:JSON.stringify({enabled:prefs.upload_enabled,upload_dir:prefs.upload_dir})});await api("/security/options",{method:"POST",body:JSON.stringify(prefs)});await savePreferenceChoice(prefs);await api("/publish/start",{method:"POST",body:JSON.stringify(prefs)});showStep("step-ready")}if(name==="stop")await api("/publish/stop",{method:"POST",body:"{}"});if(name==="set-global")await setGlobalPassword($("global-password").value);if(name==="clear-global")await setGlobalPassword("");if(name==="set-file-password")await api("/files/password",{method:"POST",body:JSON.stringify({ids:selectedFileIds(),password:$("selection-password").value})});if(name==="clear-file-password")await api("/files/password",{method:"POST",body:JSON.stringify({ids:selectedFileIds(),password:""})});if(name==="set-folder-password")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:selectedFolderIds(),password:$("selection-password").value})});if(name==="clear-folder-password")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:selectedFolderIds(),password:""})});if(name==="save-security")await api("/security/options",{method:"POST",body:JSON.stringify(currentPreferences())});if(name==="block-ip")await api("/ips/block",{method:"POST",body:JSON.stringify({ip:$("ip-input").value})});if(name==="unblock-ip")await api("/ips/unblock",{method:"POST",body:JSON.stringify({ip:$("ip-input").value})});if(name==="delete-preferences"){await api("/preferences",{method:"DELETE"});$("save-preferences").checked=false;$("preferences-message").textContent="Configuracion borrada."}$("selection-password").value="";$("global-password").value="";await refresh();notify("Listo.")}catch(e){notify(e.message)}}
+async function setGlobalPassword(password){await api("/global-password",{method:"POST",body:JSON.stringify({password})})}
+async function fileAction(kind,id){if(kind==="select"){selectedFiles.has(id)?selectedFiles.delete(id):selectedFiles.add(id);renderFiles();return}if(kind==="copy")await copyText(`${state.share_url}/download/${id}`);if(kind==="open")await api("/files/open-location",{method:"POST",body:JSON.stringify({id})});if(kind==="remove")await api("/files/remove",{method:"POST",body:JSON.stringify({ids:[id]})});await refresh()}
+async function folderAction(kind,id){if(kind==="select"){selectedFolders.has(id)?selectedFolders.delete(id):selectedFolders.add(id);renderFolders();return}if(kind==="refresh")await api("/folders/refresh",{method:"POST",body:JSON.stringify({id})});if(kind==="remove")await api("/folders/remove",{method:"POST",body:JSON.stringify({id,remove_files:true})});await refresh()}
+function showContext(e,type,id){e.preventDefault();contextTarget={type,id};const m=$("context-menu"),items=[];if(type==="file")items.push(["Copiar enlace","copy-file"],["Abrir ubicacion","open-location"],["Quitar","remove-file"],["Aplicar clave","file-pass"],["Quitar clave","file-clear"]);if(type==="folder")items.push(["Refrescar","refresh-folder"],["Quitar carpeta","remove-folder"],["Aplicar clave","folder-pass"],["Quitar clave","folder-clear"]);m.innerHTML=items.map(([l,a])=>`<button data-context="${a}">${l}</button>`).join("");m.style.left=`${e.clientX}px`;m.style.top=`${e.clientY}px`;m.hidden=false}
+async function handleContext(a){const t=contextTarget;$("context-menu").hidden=true;if(!t)return;if(t.type==="file")selectedFiles=new Set([t.id]);if(t.type==="folder")selectedFolders=new Set([t.id]);const p=$("selection-password").value;if(a==="copy-file")await copyText(`${state.share_url}/download/${t.id}`);if(a==="open-location")await api("/files/open-location",{method:"POST",body:JSON.stringify({id:t.id})});if(a==="remove-file")await api("/files/remove",{method:"POST",body:JSON.stringify({ids:[t.id]})});if(a==="file-pass")await api("/files/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:p})});if(a==="file-clear")await api("/files/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:""})});if(a==="refresh-folder")await api("/folders/refresh",{method:"POST",body:JSON.stringify({id:t.id})});if(a==="remove-folder")await api("/folders/remove",{method:"POST",body:JSON.stringify({id:t.id,remove_files:true})});if(a==="folder-pass")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:p})});if(a==="folder-clear")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:""})});await refresh()}
+function previewClient(){if(!state?.share_url){notify("Publica primero para previsualizar.");return}$("preview-frame").src=state.share_url;$("client-preview").hidden=false}
+document.addEventListener("click",e=>{const nav=e.target.closest("[data-nav]");if(nav)showStep(nav.dataset.nav);const actionButton=e.target.closest("[data-action]");if(actionButton)action(actionButton.dataset.action);const fileButton=e.target.closest("[data-file-action]");if(fileButton)fileAction(fileButton.dataset.fileAction,fileButton.dataset.id);const folderButton=e.target.closest("[data-folder-action]");if(folderButton)folderAction(folderButton.dataset.folderAction,folderButton.dataset.id);const transferButton=e.target.closest("[data-transfer-action]");if(transferButton)api("/transfers/cancel",{method:"POST",body:JSON.stringify({id:transferButton.dataset.id})}).then(refresh);const context=e.target.closest("[data-context]");if(context)handleContext(context.dataset.context);if(!e.target.closest(".context-menu"))$("context-menu").hidden=true});
+document.querySelectorAll("input[name='mode-choice']").forEach(r=>r.addEventListener("change",()=>{$("mode").value=r.value}));
+$("mode").addEventListener("change",()=>document.querySelectorAll("input[name='mode-choice']").forEach(r=>r.checked=r.value===$("mode").value));
+$("file-search").addEventListener("input",renderFiles);$("copy-url").addEventListener("click",()=>copyText(state?.share_url));$("open-client").addEventListener("click",previewClient);$("close-preview").addEventListener("click",()=>{$("client-preview").hidden=true;$("preview-frame").src="about:blank"});
+refresh();setInterval(refresh,1500);
+"""
 
 def main() -> int:
     if not run_dependency_bootstrap_if_needed():
         return 1
-    globals()["base_css"] = BASE_AUTH_CSS
-    root = tk.Tk()
-    FileTransferApp(root)
-    root.mainloop()
-    return 0
+    return run_integrated_admin_app()
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
