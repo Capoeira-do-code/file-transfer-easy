@@ -5,10 +5,12 @@ import csv
 import hashlib
 import hmac
 import importlib
+import importlib.util
 import io
 import json
 import mimetypes
 import os
+import platform
 import re
 import secrets
 import shutil
@@ -16,6 +18,7 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -24,7 +27,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import quote
 from urllib.request import urlretrieve
 
@@ -44,6 +47,9 @@ INSTALL_CLOUDFLARED_COMMAND = (
 CLOUDFLARED_WINDOWS_AMD64_URL = (
     "https://github.com/cloudflare/cloudflared/releases/latest/download/"
     "cloudflared-windows-amd64.exe"
+)
+CLOUDFLARED_RELEASE_DOWNLOAD_BASE = (
+    "https://github.com/cloudflare/cloudflared/releases/latest/download"
 )
 CHUNK_SIZE = 256 * 1024
 
@@ -89,6 +95,23 @@ I18N = {
             "tab_publish": "Publish",
             "tab_security": "Security",
             "tab_activity": "Activity",
+            "files_intro": "Choose what people can download. Folders stay linked to their source.",
+            "files_group": "Shared files",
+            "folders_group": "Linked folders",
+            "publish_intro": "Choose how the link is exposed and where incoming files are saved.",
+            "publish_connection_group": "Connection",
+            "publish_url_group": "Share link",
+            "security_intro": "Add only the controls you need. The private token is always enabled.",
+            "security_session_group": "Session access",
+            "security_selection_group": "Selected items",
+            "security_rules_group": "Limits and uploads",
+            "security_network_group": "Blocked addresses",
+            "activity_intro": "Monitor current downloads and review completed activity.",
+            "activity_active_group": "Active downloads",
+            "activity_history_group": "Recent history",
+            "files_selected_count": "{count} selected",
+            "folders_selected_count": "{count} selected",
+            "url_placeholder": "The share link will appear here after publishing",
             "btn_add_files": "Add Files",
             "btn_add_folder": "Add Folder",
             "btn_remove_files": "Remove Files",
@@ -232,8 +255,8 @@ I18N = {
     "es": {
         "qt": {
             "language_label": "Idioma",
-            "language_en": "Ingles",
-            "language_es": "Espanol",
+            "language_en": "Inglés",
+            "language_es": "Español",
             "status_prefix": "Estado",
             "status_ready": "Preparado",
             "status_starting": "Iniciando",
@@ -248,45 +271,62 @@ I18N = {
             "status_interrupted_transfer": "Interrumpida",
             "status_error_transfer": "Fallida",
             "tab_files": "Archivos",
-            "tab_publish": "Publicacion",
+            "tab_publish": "Publicación",
             "tab_security": "Seguridad",
             "tab_activity": "Actividad",
-            "btn_add_files": "Anadir archivos",
-            "btn_add_folder": "Anadir carpeta",
+            "files_intro": "Elige qué pueden descargar. Las carpetas se mantienen vinculadas a su origen.",
+            "files_group": "Archivos compartidos",
+            "folders_group": "Carpetas vinculadas",
+            "publish_intro": "Elige cómo se publica el enlace y dónde se guardan los archivos recibidos.",
+            "publish_connection_group": "Conexión",
+            "publish_url_group": "Enlace para compartir",
+            "security_intro": "Activa solo los controles que necesites. El token privado siempre está habilitado.",
+            "security_session_group": "Acceso a la sesión",
+            "security_selection_group": "Elementos seleccionados",
+            "security_rules_group": "Límites y subidas",
+            "security_network_group": "Direcciones bloqueadas",
+            "activity_intro": "Supervisa las descargas actuales y consulta la actividad completada.",
+            "activity_active_group": "Descargas activas",
+            "activity_history_group": "Historial reciente",
+            "files_selected_count": "{count} seleccionados",
+            "folders_selected_count": "{count} seleccionadas",
+            "url_placeholder": "El enlace aparecerá aquí después de publicar",
+            "btn_add_files": "Añadir archivos",
+            "btn_add_folder": "Añadir carpeta",
             "btn_remove_files": "Quitar archivos",
             "btn_remove_folders": "Quitar carpetas",
             "btn_refresh_folder": "Refrescar carpeta",
             "include_subfolders": "Incluir subcarpetas",
             "files_name": "Nombre",
-            "files_size": "Tamano",
+            "files_size": "Tamaño",
             "files_source": "Origen",
             "files_protected": "Protegido",
             "files_date": "Fecha",
             "folders_name": "Carpeta",
             "folders_count": "Archivos",
-            "folders_size": "Tamano",
+            "folders_size": "Tamaño",
             "folders_protected": "Protegida",
             "publish_mode": "Modo",
             "publish_port": "Puerto local",
             "publish_manual_port": "Usar exactamente este puerto",
-            "publish_tailscale_port": "Puerto publico Tailscale",
+            "publish_tailscale_port": "Puerto público Tailscale",
             "publish_uploads": "Permitir subidas",
             "publish_upload_dir": "Carpeta de subidas",
             "btn_choose": "Elegir",
             "btn_publish": "Publicar ahora",
             "btn_stop": "Detener",
             "btn_copy_url": "Copiar URL",
-            "security_global_password": "Contrasena global",
-            "security_selection_password": "Contrasena para seleccion",
+            "security_global_password": "Contraseña global",
+            "security_selection_password": "Contraseña para la selección",
             "btn_apply_global": "Aplicar global",
             "btn_clear_global": "Quitar global",
             "btn_apply_file_password": "Proteger archivos",
             "btn_clear_file_password": "Desproteger archivos",
             "btn_apply_folder_password": "Proteger carpetas",
             "btn_clear_folder_password": "Desproteger carpetas",
-            "security_expire_minutes": "Expirar enlace en minutos (0 = nunca)",
-            "security_download_limit": "Limite por archivo (0 = sin limite)",
-            "security_uploads_require_global": "Subidas requieren contrasena global",
+            "security_expire_minutes": "El enlace caduca en minutos (0 = nunca)",
+            "security_download_limit": "Límite por archivo (0 = sin límite)",
+            "security_uploads_require_global": "Las subidas requieren contraseña global",
             "btn_save_security": "Guardar reglas de seguridad",
             "ip_placeholder": "IP (ej: 1.2.3.4)",
             "btn_block_ip": "Bloquear IP",
@@ -311,37 +351,37 @@ I18N = {
             "history_ip": "IP",
             "logs_title": "Logs",
             "history_reason_none": "-",
-            "protected_yes": "Si",
+            "protected_yes": "Sí",
             "protected_no": "No",
-            "mode_auto": "Automatico",
+            "mode_auto": "Automático",
             "mode_tailscale": "Tailscale Funnel",
             "mode_cloudflare": "Cloudflare Quick Tunnel",
             "mode_direct": "Puerto propio",
             "context_remove": "Quitar",
             "context_protect": "Proteger",
             "context_unprotect": "Desproteger",
-            "context_open_location": "Abrir ubicacion",
+            "context_open_location": "Abrir ubicación",
             "context_copy_link": "Copiar enlace",
             "context_refresh": "Refrescar",
-            "password_prompt_title": "Definir contrasena",
-            "password_prompt_file": "Contrasena para archivo(s) seleccionado(s):",
-            "password_prompt_folder": "Contrasena para carpeta(s) seleccionada(s):",
+            "password_prompt_title": "Definir contraseña",
+            "password_prompt_file": "Contraseña para los archivos seleccionados:",
+            "password_prompt_folder": "Contraseña para las carpetas seleccionadas:",
             "error_select_file": "Selecciona al menos un archivo.",
             "error_select_folder": "Selecciona al menos una carpeta.",
-            "error_no_url": "Todavia no hay una URL publicada.",
-            "exit_confirm": "Hay servicios activos. Quieres detener todo y salir?",
+            "error_no_url": "Todavía no hay una URL publicada.",
+            "exit_confirm": "Hay servicios activos. ¿Quieres detenerlos y salir?",
             "security_summary": "IPs bloqueadas: {ips}",
             "security_on": "ACTIVA",
             "security_off": "INACTIVA",
-            "indicator_global_password": "Contrasena global",
+            "indicator_global_password": "Contraseña global",
             "indicator_upload_guard": "Guardia de subida",
             "indicator_protected_files": "Archivos protegidos",
             "indicator_protected_folders": "Carpetas protegidas",
             "activity_log_title": "Registro de actividad",
-            "recommendation_empty": "Empieza anadiendo archivos o una carpeta.",
-            "recommendation_ready": "Enlace listo. Puedes copiarlo o detener la publicacion.",
+            "recommendation_empty": "Empieza añadiendo archivos o una carpeta.",
+            "recommendation_ready": "Enlace listo. Puedes copiarlo o detener la publicación.",
             "recommendation_uploads": "Subidas activadas. Revisa la carpeta de destino antes de publicar.",
-            "recommendation_publish": "Todo listo para publicar con modo automatico.",
+            "recommendation_publish": "Todo listo para publicar en modo automático.",
         },
         "web": {
             "auth_title": "Acceso protegido",
@@ -387,7 +427,7 @@ I18N = {
             "download_limit_message": "Límite de descargas alcanzado para este archivo.",
             "download_none_message": "No hay archivos desbloqueados para descargar.",
             "zip_name": "file-transfer-easy.zip",
-            "status_yes": "Si",
+            "status_yes": "Sí",
             "status_no": "No",
         },
     },
@@ -489,7 +529,65 @@ import_web_dependencies()
 
 
 def missing_runtime_modules() -> list[str]:
-    return [label for module, label in REQUIRED_MODULES.items() if importlib.util.find_spec(module) is None]
+    return [
+        label
+        for module, label in REQUIRED_MODULES.items()
+        if importlib.util.find_spec(module) is None
+    ]
+
+
+def prepare_macos_qt_platform_plugins(
+    source_dir: Path | None = None,
+    compatibility_dir: Path | None = None,
+    platform_name: str | None = None,
+) -> Path | None:
+    """Expose Qt's macOS platform plugins with the suffix its loader expects."""
+    if (platform_name or sys.platform) != "darwin":
+        return None
+
+    if source_dir is None:
+        candidates: list[Path] = []
+        spec = importlib.util.find_spec("PySide6")
+        if spec and spec.submodule_search_locations:
+            candidates.extend(
+                Path(location) / "Qt" / "plugins" / "platforms"
+                for location in spec.submodule_search_locations
+            )
+        frozen_root = getattr(sys, "_MEIPASS", None)
+        if frozen_root:
+            candidates.append(Path(frozen_root) / "PySide6" / "Qt" / "plugins" / "platforms")
+        source_dir = next(
+            (candidate for candidate in candidates if (candidate / "libqcocoa.dylib").is_file()),
+            None,
+        )
+    if source_dir is None:
+        return None
+
+    source_dir = Path(source_dir).resolve()
+    compatibility_dir = Path(compatibility_dir or APP_DIR / "qt-platforms")
+    compatibility_dir.mkdir(parents=True, exist_ok=True)
+    for source in source_dir.glob("libq*.dylib"):
+        target = compatibility_dir / f"{source.stem}.so"
+        try:
+            if target.is_symlink() and target.resolve() == source.resolve():
+                continue
+        except OSError:
+            pass
+        if target.exists() or target.is_symlink():
+            target.unlink()
+        try:
+            target.symlink_to(source.resolve())
+        except OSError:
+            shutil.copy2(source, target)
+
+    cocoa_plugin = compatibility_dir / "libqcocoa.so"
+    if not cocoa_plugin.exists():
+        return None
+
+    existing_paths = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH", "").split(os.pathsep)
+    plugin_paths = [str(compatibility_dir), *(path for path in existing_paths if path)]
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.pathsep.join(dict.fromkeys(plugin_paths))
+    return compatibility_dir
 
 
 def load_preferences(path: Path | None = None) -> dict:
@@ -617,6 +715,26 @@ def show_native_notice(title: str, message: str, error: bool = False) -> None:
             style |= 0x00000010 if error else 0x00000040  # MB_ICONERROR / MB_ICONINFORMATION
             ctypes.windll.user32.MessageBoxW(0, message, title, style)
             return
+    if sys.platform == "darwin" and error:
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    "on run argv",
+                    "-e",
+                    'display dialog (item 2 of argv) with title (item 1 of argv) buttons {"OK"} default button "OK" with icon stop',
+                    "-e",
+                    "end run",
+                    "--",
+                    title,
+                    message,
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
     stream = sys.stderr if error else sys.stdout
     print(f"[{title}] {message}", file=stream)
 
@@ -632,9 +750,13 @@ def run_dependency_bootstrap_if_needed() -> bool:
         show_native_notice(
             APP_NAME,
             (
-                "No se pudieron instalar las dependencias automaticamente.\n\n"
+                "No se pudieron instalar las dependencias automáticamente.\n\n"
                 f"Detalle: {exc}\n\n"
-                "Ejecuta iniciar.bat o instala requirements.txt manualmente."
+                + (
+                    "Ejecuta: python3 -m pip install -r requirements.txt"
+                    if sys.platform == "darwin"
+                    else "Ejecuta iniciar.bat o instala requirements.txt manualmente."
+                )
             ),
             error=True,
         )
@@ -729,7 +851,7 @@ def choose_port(raw_port: str, manual: bool) -> tuple[int | None, str | None]:
         if port < 1 or port > 65535:
             return None, "El puerto debe estar entre 1 y 65535."
         if not is_port_available(port):
-            return None, f"El puerto {port} esta ocupado o requiere permisos."
+            return None, f"El puerto {port} está ocupado o requiere permisos."
         return port, None
 
     candidates: list[int] = []
@@ -828,22 +950,75 @@ def find_cloudflared() -> str | None:
     return None
 
 
+def cloudflared_download_url() -> tuple[str, bool] | None:
+    """Return the official asset URL and whether it is a tar archive."""
+    machine = platform.machine().strip().lower()
+    architecture = "arm64" if machine in {"arm64", "aarch64"} else "amd64"
+    if os.name == "nt":
+        return CLOUDFLARED_WINDOWS_AMD64_URL, False
+    if sys.platform == "darwin":
+        return (
+            f"{CLOUDFLARED_RELEASE_DOWNLOAD_BASE}/cloudflared-darwin-{architecture}.tgz",
+            True,
+        )
+    if sys.platform.startswith("linux"):
+        return (
+            f"{CLOUDFLARED_RELEASE_DOWNLOAD_BASE}/cloudflared-linux-{architecture}",
+            False,
+        )
+    return None
+
+
+def extract_cloudflared_archive(archive_path: Path, target: Path) -> None:
+    temp_target = target.with_name(f"{target.name}.extracting")
+    try:
+        with tarfile.open(archive_path, "r:gz") as archive:
+            member = next(
+                (
+                    candidate
+                    for candidate in archive.getmembers()
+                    if candidate.isfile() and Path(candidate.name).name == "cloudflared"
+                ),
+                None,
+            )
+            if member is None:
+                raise RuntimeError("El paquete oficial no contiene el binario cloudflared.")
+            source = archive.extractfile(member)
+            if source is None:
+                raise RuntimeError("No se pudo leer el binario cloudflared.")
+            with source, temp_target.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+        temp_target.replace(target)
+    finally:
+        with contextlib.suppress(OSError):
+            temp_target.unlink()
+
+
 def install_cloudflared(log: Callable[[str], None] | None = None) -> str:
     existing = find_cloudflared()
     if existing:
         return existing
     LOCAL_BIN_DIR.mkdir(parents=True, exist_ok=True)
-    target = LOCAL_BIN_DIR / ("cloudflared.exe" if os.name == "nt" else "cloudflared")
-    if os.name == "nt":
+    # Keep one cache filename on every platform; Unix can execute a file with an .exe suffix.
+    target = LOCAL_BIN_DIR / "cloudflared.exe"
+    download = cloudflared_download_url()
+    if download is not None:
+        download_url, is_archive = download
         try:
             if log:
-                log("Descargando cloudflared desde GitHub oficial de Cloudflare...")
-            urlretrieve(CLOUDFLARED_WINDOWS_AMD64_URL, target)
+                log("Descargando cloudflared desde la version oficial de Cloudflare...")
+            urlretrieve(download_url, target)
+            if is_archive and tarfile.is_tarfile(target):
+                extract_cloudflared_archive(target, target)
+            if os.name != "nt":
+                target.chmod(target.stat().st_mode | 0o755)
             return str(target)
         except Exception as exc:
+            with contextlib.suppress(OSError):
+                target.unlink()
             if log:
                 log(f"No se pudo descargar cloudflared: {exc}")
-    winget = shutil.which("winget")
+    winget = shutil.which("winget") if os.name == "nt" else None
     if winget:
         command = [
             winget,
@@ -871,9 +1046,13 @@ def install_cloudflared(log: Callable[[str], None] | None = None) -> str:
         found = find_cloudflared()
         if completed.returncode == 0 and found:
             return found
+    hint = (
+        f" Ejecuta: {INSTALL_CLOUDFLARED_COMMAND}"
+        if os.name == "nt"
+        else " Instala cloudflared desde su repositorio oficial de GitHub."
+    )
     raise RuntimeError(
-        "Cloudflared no esta instalado y no se pudo instalar automaticamente. "
-        f"Ejecuta: {INSTALL_CLOUDFLARED_COMMAND}"
+        "Cloudflared no está instalado y no se pudo instalar automáticamente." + hint
     )
 
 
@@ -964,7 +1143,7 @@ class ShareState:
                         errors.append(f"{path.name}: no es un archivo.")
                         continue
                     if resolved in existing:
-                        errors.append(f"{path.name}: ya esta en la lista.")
+                        errors.append(f"{path.name}: ya está en la lista.")
                         continue
                     item = SharedFile.from_path(
                         resolved,
@@ -1516,9 +1695,11 @@ def build_zip(files: Iterable[SharedFile]) -> Path:
 def file_view(item: SharedFile, state: ShareState) -> dict:
     folder = state.get_folder(item.folder_id) if item.folder_id else None
     protected = state.item_is_protected(item)
+    suffix = Path(item.display_name).suffix.lstrip(".")
     return {
         "id": item.id,
         "display_name": item.display_name,
+        "extension_label": (suffix[:5] or "FILE").upper(),
         "path": item.path,
         "size": item.size,
         "size_text": format_bytes(item.size),
@@ -1578,7 +1759,7 @@ def create_web_app(
     state: ShareState,
     stats: StatsStore | None = None,
     transfers: TransferManager | None = None,
-) -> "Flask":
+) -> Any:
     if not import_web_dependencies():
         raise RuntimeError("Faltan dependencias. Ejecuta: python -m pip install -r requirements.txt")
     assert Flask is not None and Response is not None
@@ -1893,7 +2074,7 @@ class WebServer:
     def start(self, port: int) -> None:
         with self._lock:
             if self.running:
-                raise RuntimeError("El servidor ya esta iniciado.")
+                raise RuntimeError("El servidor ya está iniciado.")
             if not import_web_dependencies() or create_server is None:
                 raise RuntimeError("Falta Flask o Waitress. Revisa requirements.txt.")
             app = create_web_app(self.state, self.stats, self.transfers)
@@ -1945,7 +2126,7 @@ class TunnelProcess:
     def start_tailscale(self, local_port: int, public_port: str) -> None:
         executable = shutil.which("tailscale")
         if not executable:
-            raise RuntimeError("Tailscale no esta instalado o no esta en PATH.")
+            raise RuntimeError("Tailscale no está instalado o no está en PATH.")
         self._start([executable, "funnel", "--yes", f"--https={public_port}", f"http://127.0.0.1:{local_port}"], "tailscale")
 
     def start_cloudflare(self, local_port: int) -> None:
@@ -2043,7 +2224,7 @@ class AppController:
             url = f"{url.rstrip('/')}/s/{self.state.token}"
         self.share_url = url
         self.status = "published"
-        self.log(f"URL publica lista: {url}")
+        self.log(f"URL pública lista: {url}")
 
     def set_ui_language(self, language: str, persist: bool = True) -> None:
         language = normalize_ui_language(language)
@@ -2101,13 +2282,13 @@ class AppController:
             self.preferences = dict(DEFAULT_PREFERENCES)
             self.set_ui_language(self.preferences.get("ui_language", "en"), persist=False)
             self.preferences_saved = False
-            self.log("Configuracion guardada eliminada.")
+            self.log("Configuración guardada eliminada.")
             return self.preferences_payload()
         save_preferences(preferences)
         self.preferences = load_preferences()
         self.set_ui_language(self.preferences.get("ui_language", "en"), persist=False)
         self.preferences_saved = True
-        self.log("Configuracion guardada.")
+        self.log("Configuración guardada.")
         return self.preferences_payload()
 
     def delete_saved_preferences(self) -> dict:
@@ -2116,7 +2297,7 @@ class AppController:
         self.set_ui_language(self.preferences.get("ui_language", "en"), persist=False)
         self.preferences_saved = False
         self.last_preference_warnings = []
-        self.log("Configuracion guardada borrada.")
+        self.log("Configuración guardada borrada.")
         return self.preferences_payload()
 
     def wizard_step(self) -> int:
@@ -2213,14 +2394,14 @@ class AppController:
 
     def add_files(self, paths: Iterable[str]) -> dict:
         added, errors = self.state.add_paths(paths)
-        self.log(f"{added} archivo(s) anadido(s).")
+        self.log(f"{added} archivo(s) añadido(s).")
         for error in errors:
             self.log(error)
         return {"ok": not errors, "added": added, "errors": errors}
 
     def add_folder(self, path: str, include_subfolders: bool = False, password: str = "") -> dict:
         added, errors = self.state.add_folder(path, include_subfolders, password=password)
-        self.log(f"Carpeta anadida: {added} archivo(s).")
+        self.log(f"Carpeta añadida: {added} archivo(s).")
         for error in errors:
             self.log(error)
         return {"ok": not errors, "added": added, "errors": errors}
@@ -2234,7 +2415,7 @@ class AppController:
 
     def start_publish(self, options: dict) -> dict:
         if self.web_server.running:
-            return {"ok": False, "message": "Ya hay una publicacion activa."}
+            return {"ok": False, "message": "Ya hay una publicación activa."}
         raw_port = str(options.get("port") or "80")
         manual = bool(options.get("manual_port"))
         mode = str(options.get("mode") or "tailscale")
@@ -2325,7 +2506,7 @@ class AppController:
         return {"ok": True}
 
 
-def create_admin_app(controller: AppController) -> "Flask":
+def create_admin_app(controller: AppController) -> Any:
     if not import_web_dependencies():
         raise RuntimeError("Faltan dependencias web.")
     admin_app = Flask(f"{APP_NAME} Admin", static_folder=None)
@@ -2401,7 +2582,7 @@ def create_admin_app(controller: AppController) -> "Flask":
         require_admin(token)
         data = request.get_json(silent=True) or {}
         updated = controller.state.set_file_passwords(data.get("ids", []), data.get("password", ""))
-        controller.log(f"Contrasena de archivo actualizada en {updated} archivo(s).")
+        controller.log(f"Contraseña de archivo actualizada en {updated} archivo(s).")
         return jsonify({"ok": True, "updated": updated})
 
     @admin_app.post("/admin/<token>/api/global-password")
@@ -2409,7 +2590,7 @@ def create_admin_app(controller: AppController) -> "Flask":
         require_admin(token)
         data = request.get_json(silent=True) or {}
         controller.state.set_global_password(data.get("password", ""))
-        controller.log("Contrasena global aplicada." if data.get("password") else "Contrasena global quitada.")
+        controller.log("Contraseña global aplicada." if data.get("password") else "Contraseña global quitada.")
         return jsonify({"ok": True})
 
     @admin_app.post("/admin/<token>/api/security/options")
@@ -2495,7 +2676,7 @@ def create_admin_app(controller: AppController) -> "Flask":
         require_admin(token)
         data = request.get_json(silent=True) or {}
         updated = controller.state.set_folder_passwords(data.get("ids", []), data.get("password", ""))
-        controller.log(f"Contrasena de carpeta actualizada en {updated} carpeta(s).")
+        controller.log(f"Contraseña de carpeta actualizada en {updated} carpeta(s).")
         return jsonify({"ok": True, "updated": updated})
 
     @admin_app.post("/admin/<token>/api/uploads")
@@ -2628,6 +2809,7 @@ def needs_exit_confirmation(controller: AppController) -> bool:
 
 
 def run_integrated_admin_app() -> int:
+    prepare_macos_qt_platform_plugins()
     try:
         qt_core = importlib.import_module("PySide6.QtCore")
         qt_gui = importlib.import_module("PySide6.QtGui")
@@ -2637,6 +2819,7 @@ def run_integrated_admin_app() -> int:
 
     Qt = qt_core.Qt
     QTimer = qt_core.QTimer
+    QItemSelectionModel = qt_core.QItemSelectionModel
     QAction = qt_gui.QAction
     QTextCursor = qt_gui.QTextCursor
     QApplication = qt_widgets.QApplication
@@ -2644,8 +2827,10 @@ def run_integrated_admin_app() -> int:
     QCheckBox = qt_widgets.QCheckBox
     QComboBox = qt_widgets.QComboBox
     QFileDialog = qt_widgets.QFileDialog
+    QFrame = qt_widgets.QFrame
     QFormLayout = qt_widgets.QFormLayout
     QGridLayout = qt_widgets.QGridLayout
+    QGroupBox = qt_widgets.QGroupBox
     QHBoxLayout = qt_widgets.QHBoxLayout
     QInputDialog = qt_widgets.QInputDialog
     QLabel = qt_widgets.QLabel
@@ -2670,8 +2855,8 @@ def run_integrated_admin_app() -> int:
             self._last_log_dump = ""
             self._labels = i18n_bundle(self.controller.ui_language)["qt"]
             self.setWindowTitle(APP_NAME)
-            self.resize(1220, 780)
-            self.setMinimumSize(980, 640)
+            self.resize(1260, 820)
+            self.setMinimumSize(1020, 680)
             self._build_ui()
             self._build_styles()
             self._apply_language_texts()
@@ -2684,70 +2869,143 @@ def run_integrated_admin_app() -> int:
         def _build_styles(self) -> None:
             self.setStyleSheet(
                 """
-                QWidget { font-family: "Segoe UI"; font-size: 10pt; color: #1f2937; border-radius: 0; }
-                QMainWindow, QWidget#root { background: #f4f6f9; }
-                QTabWidget::pane { border: 1px solid #d2d9e3; background: #ffffff; top: -1px; }
-                QTabBar::tab {
-                    background: #eef2f7;
-                    border: 1px solid #d2d9e3;
-                    border-bottom: 0;
-                    padding: 6px 10px;
-                    margin-right: 1px;
+                QWidget { font-size: 10pt; color: #17212b; }
+                QMainWindow, QWidget#root { background: #f3f7f7; }
+                QFrame#appHeader {
+                    background: #ffffff;
+                    border: 1px solid #dce7e5;
+                    border-radius: 14px;
                 }
-                QTabBar::tab:selected { background: #ffffff; }
-                QPushButton {
-                    background: #0b57d0;
+                QLabel#brandMark {
+                    background: #0f8a7a;
                     color: #ffffff;
-                    border: 1px solid #0b57d0;
-                    padding: 5px 10px;
-                    min-height: 30px;
-                    font-weight: 600;
+                    border-radius: 11px;
+                    font-size: 17pt;
+                    font-weight: 800;
                 }
-                QPushButton:hover { background: #0949b3; }
-                QPushButton#secondary {
+                QLabel#appTitle { font-size: 20px; font-weight: 750; color: #12201e; }
+                QLabel#sectionIntro { color: #60706e; font-size: 10pt; padding: 0 2px 4px 2px; }
+                QLabel#subtleText { color: #60706e; }
+                QTabWidget::pane {
+                    border: 1px solid #dce7e5;
+                    border-radius: 11px;
                     background: #ffffff;
-                    color: #1f2937;
-                    border: 1px solid #bcc6d4;
+                    top: -1px;
                 }
-                QPushButton#secondary:hover { background: #f4f7fb; }
-                QLineEdit, QComboBox, QSpinBox {
-                    background: #ffffff;
-                    border: 1px solid #bcc6d4;
-                    padding: 5px 7px;
-                    min-height: 30px;
-                }
-                QTableWidget {
-                    border: 1px solid #d2d9e3;
-                    background: #ffffff;
-                    gridline-color: #e7edf5;
-                }
-                QTableView::item { padding: 4px 6px; }
-                QHeaderView::section {
-                    background: #f5f8fc;
+                QTabBar::tab {
+                    background: transparent;
+                    color: #566664;
                     border: 0;
-                    border-bottom: 1px solid #d2d9e3;
-                    padding: 5px 6px;
-                    font-weight: 600;
+                    border-bottom: 0;
+                    padding: 10px 18px;
+                    margin-right: 3px;
+                    font-weight: 650;
                 }
-                QPlainTextEdit {
-                    background: #0f172a;
-                    color: #dbe7ff;
-                    border: 1px solid #1e293b;
-                    padding: 6px;
+                QTabBar::tab:hover { color: #0a655c; background: #edf8f5; border-radius: 8px; }
+                QTabBar::tab:selected {
+                    background: #dff3ee;
+                    color: #08685d;
+                    border-radius: 8px;
                 }
-                QLabel#statusBadge {
-                    background: #e8f0fe;
-                    color: #0b57d0;
-                    border: 1px solid #c6d7ff;
-                    padding: 6px 10px;
+                QGroupBox {
+                    background: #fbfdfd;
+                    border: 1px solid #dce7e5;
+                    border-radius: 10px;
+                    margin-top: 12px;
+                    padding: 14px 12px 12px 12px;
                     font-weight: 700;
                 }
-                QLabel#metricBadge {
-                    background: #f8fafc;
-                    border: 1px solid #d2d9e3;
-                    padding: 5px 9px;
-                    font-weight: 600;
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    subcontrol-position: top left;
+                    left: 12px;
+                    padding: 0 6px;
+                    color: #314440;
+                    background: #fbfdfd;
                 }
+                QPushButton {
+                    background: #0f8a7a;
+                    color: #ffffff;
+                    border: 1px solid #0f8a7a;
+                    border-radius: 7px;
+                    padding: 0 14px;
+                    min-height: 36px;
+                    font-weight: 650;
+                }
+                QPushButton:hover { background: #0b776a; border-color: #0b776a; }
+                QPushButton:pressed { background: #08685d; }
+                QPushButton:focus { border: 2px solid #064f47; }
+                QPushButton:disabled {
+                    background: #e5ecea;
+                    color: #93a19e;
+                    border-color: #d9e2e0;
+                }
+                QPushButton#secondary {
+                    background: #ffffff;
+                    color: #314440;
+                    border: 1px solid #b9c9c6;
+                }
+                QPushButton#secondary:hover { background: #f0f7f5; border-color: #83a9a2; }
+                QPushButton#secondary:disabled { color: #a5afad; border-color: #dce5e3; }
+                QLineEdit, QComboBox, QSpinBox {
+                    background: #ffffff;
+                    border: 1px solid #b9c9c6;
+                    border-radius: 7px;
+                    padding: 0 10px;
+                    min-height: 36px;
+                    selection-background-color: #bde6dd;
+                }
+                QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 2px solid #0f8a7a; }
+                QLineEdit:read-only { background: #f2f6f5; color: #42524f; }
+                QCheckBox { spacing: 8px; color: #314440; }
+                QTableWidget {
+                    border: 1px solid #dce7e5;
+                    border-radius: 8px;
+                    background: #ffffff;
+                    alternate-background-color: #f7faf9;
+                    gridline-color: transparent;
+                    selection-background-color: #dff3ee;
+                    selection-color: #17212b;
+                    outline: none;
+                }
+                QTableView::item { padding: 6px 8px; border-bottom: 1px solid #edf2f1; }
+                QTableView::item:hover { background: #eef8f6; }
+                QHeaderView::section {
+                    background: #f0f6f4;
+                    color: #475956;
+                    border: 0;
+                    border-bottom: 1px solid #dce7e5;
+                    padding: 8px;
+                    font-weight: 650;
+                }
+                QPlainTextEdit {
+                    background: #132421;
+                    color: #d9eeea;
+                    border: 1px solid #28423d;
+                    border-radius: 8px;
+                    padding: 8px;
+                }
+                QLabel#statusBadge {
+                    background: #eef3f2;
+                    color: #50615e;
+                    border: 1px solid #d5e0de;
+                    border-radius: 13px;
+                    padding: 7px 12px;
+                    font-weight: 750;
+                }
+                QLabel#statusBadge[statusCode="starting"] { background: #fff4d6; color: #72530a; border-color: #ead28c; }
+                QLabel#statusBadge[statusCode="published"] { background: #dcf5ea; color: #086044; border-color: #a9dfcc; }
+                QLabel#statusBadge[statusCode="local"] { background: #e6f0ff; color: #24558f; border-color: #bdd2ef; }
+                QLabel#statusBadge[statusCode="error"] { background: #ffe8e4; color: #8b2f24; border-color: #efb9b1; }
+                QLabel#metricBadge {
+                    background: #f0f6f4;
+                    color: #40524e;
+                    border: 1px solid #d7e3e0;
+                    border-radius: 12px;
+                    padding: 6px 10px;
+                    font-weight: 650;
+                }
+                QToolTip { background: #17212b; color: #ffffff; border: 0; padding: 6px; }
                 """
             )
 
@@ -2757,10 +3015,29 @@ def run_integrated_admin_app() -> int:
         def _apply_language_texts(self) -> None:
             self._labels = i18n_bundle(self.controller.ui_language)["qt"]
             self.language_label.setText(self._t("language_label"))
+            self.language_combo.blockSignals(True)
+            self.language_combo.setItemText(0, self._t("language_en"))
+            self.language_combo.setItemText(1, self._t("language_es"))
+            self.language_combo.blockSignals(False)
             self.tabs.setTabText(self.tabs.indexOf(self.files_tab), self._t("tab_files"))
             self.tabs.setTabText(self.tabs.indexOf(self.publish_tab), self._t("tab_publish"))
             self.tabs.setTabText(self.tabs.indexOf(self.security_tab), self._t("tab_security"))
             self.tabs.setTabText(self.tabs.indexOf(self.activity_tab), self._t("tab_activity"))
+
+            self.files_intro_label.setText(self._t("files_intro"))
+            self.files_group.setTitle(self._t("files_group"))
+            self.folders_group.setTitle(self._t("folders_group"))
+            self.publish_intro_label.setText(self._t("publish_intro"))
+            self.publish_connection_group.setTitle(self._t("publish_connection_group"))
+            self.publish_url_group.setTitle(self._t("publish_url_group"))
+            self.security_intro_label.setText(self._t("security_intro"))
+            self.security_session_group.setTitle(self._t("security_session_group"))
+            self.security_selection_group.setTitle(self._t("security_selection_group"))
+            self.security_rules_group.setTitle(self._t("security_rules_group"))
+            self.security_network_group.setTitle(self._t("security_network_group"))
+            self.activity_intro_label.setText(self._t("activity_intro"))
+            self.activity_active_group.setTitle(self._t("activity_active_group"))
+            self.activity_history_group.setTitle(self._t("activity_history_group"))
 
             self.add_files_button.setText(self._t("btn_add_files"))
             self.add_folder_button.setText(self._t("btn_add_folder"))
@@ -2811,6 +3088,7 @@ def run_integrated_admin_app() -> int:
             self.start_button.setText(self._t("btn_publish"))
             self.stop_button.setText(self._t("btn_stop"))
             self.copy_button.setText(self._t("btn_copy_url"))
+            self.share_url_edit.setPlaceholderText(self._t("url_placeholder"))
 
             self.security_global_label.setText(self._t("security_global_password"))
             self.security_selection_label.setText(self._t("security_selection_password"))
@@ -2851,23 +3129,35 @@ def run_integrated_admin_app() -> int:
                     self._t("history_ip"),
                 ]
             )
-            self.log_title_label.setText(self._t("activity_log_title"))
+            self.activity_log_group.setTitle(self._t("activity_log_title"))
+            self._update_action_state()
+            self._update_publish_fields()
 
         def _build_ui(self) -> None:
             root = QWidget(self)
             root.setObjectName("root")
             self.setCentralWidget(root)
             layout = QVBoxLayout(root)
-            layout.setContentsMargins(10, 10, 10, 10)
-            layout.setSpacing(8)
+            layout.setContentsMargins(18, 18, 18, 18)
+            layout.setSpacing(12)
 
-            header = QHBoxLayout()
-            header.setSpacing(8)
+            header_card = QFrame()
+            header_card.setObjectName("appHeader")
+            header = QHBoxLayout(header_card)
+            header.setContentsMargins(16, 13, 16, 13)
+            header.setSpacing(12)
+            brand_mark = QLabel("FT")
+            brand_mark.setObjectName("brandMark")
+            brand_mark.setAlignment(Qt.AlignCenter)
+            brand_mark.setFixedSize(46, 46)
+            header.addWidget(brand_mark)
             title_box = QVBoxLayout()
+            title_box.setSpacing(2)
             title = QLabel(APP_NAME)
-            title.setStyleSheet("font-size: 20px; font-weight: 700;")
+            title.setObjectName("appTitle")
             self.recommendation_label = QLabel("")
-            self.recommendation_label.setStyleSheet("color: #5d6778;")
+            self.recommendation_label.setObjectName("subtleText")
+            self.recommendation_label.setWordWrap(True)
             title_box.addWidget(title)
             title_box.addWidget(self.recommendation_label)
             header.addLayout(title_box, 1)
@@ -2877,7 +3167,8 @@ def run_integrated_admin_app() -> int:
             self.language_label = QLabel("")
             self.language_combo = QComboBox()
             self.language_combo.addItem("English", "en")
-            self.language_combo.addItem("Espanol", "es")
+            self.language_combo.addItem("Español", "es")
+            self.language_combo.setMinimumWidth(118)
             language_box.addWidget(self.language_label)
             language_box.addWidget(self.language_combo)
             header.addLayout(language_box)
@@ -2885,9 +3176,10 @@ def run_integrated_admin_app() -> int:
             self.status_label = QLabel("")
             self.status_label.setObjectName("statusBadge")
             header.addWidget(self.status_label)
-            layout.addLayout(header)
+            layout.addWidget(header_card)
 
             self.tabs = QTabWidget()
+            self.tabs.setDocumentMode(True)
             layout.addWidget(self.tabs, 1)
 
             self.files_tab = QWidget()
@@ -2905,12 +3197,12 @@ def run_integrated_admin_app() -> int:
             self._build_activity_tab()
             self.language_combo.currentIndexChanged.connect(self.on_language_changed)
 
-        def _secondary_button(self, text: str) -> QPushButton:
+        def _secondary_button(self, text: str) -> Any:
             button = QPushButton(text)
             button.setObjectName("secondary")
             return button
 
-        def _table(self, headers: list[str]) -> QTableWidget:
+        def _table(self, headers: list[str]) -> Any:
             table = QTableWidget(0, len(headers))
             table.setHorizontalHeaderLabels(headers)
             table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -2918,10 +3210,58 @@ def run_integrated_admin_app() -> int:
             table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             table.horizontalHeader().setStretchLastSection(True)
             table.verticalHeader().setVisible(False)
-            table.verticalHeader().setDefaultSectionSize(28)
+            table.verticalHeader().setDefaultSectionSize(36)
+            table.setAlternatingRowColors(True)
+            table.setShowGrid(False)
+            table.setSortingEnabled(False)
             return table
 
-        def _selected_ids(self, table: QTableWidget) -> list[str]:
+        def _intro_label(self) -> Any:
+            label = QLabel("")
+            label.setObjectName("sectionIntro")
+            label.setWordWrap(True)
+            return label
+
+        def _restore_selected_ids(self, table: Any, selected_ids: set[str]) -> None:
+            if not selected_ids:
+                return
+            selection_model = table.selectionModel()
+            for row in range(table.rowCount()):
+                item = table.item(row, 0)
+                if item and str(item.data(Qt.UserRole) or "") in selected_ids:
+                    index = table.model().index(row, 0)
+                    selection_model.select(
+                        index,
+                        QItemSelectionModel.SelectionFlag.Select
+                        | QItemSelectionModel.SelectionFlag.Rows,
+                    )
+
+        def _update_action_state(self, *_args) -> None:
+            file_count = len(self._selected_ids(self.file_table)) if hasattr(self, "file_table") else 0
+            folder_count = len(self._selected_ids(self.folder_table)) if hasattr(self, "folder_table") else 0
+            active_count = len(self._selected_ids(self.active_table)) if hasattr(self, "active_table") else 0
+            if hasattr(self, "remove_files_button"):
+                self.remove_files_button.setEnabled(file_count > 0)
+                self.remove_folders_button.setEnabled(folder_count > 0)
+                self.refresh_folders_button.setEnabled(folder_count > 0)
+            if hasattr(self, "apply_file_button"):
+                self.apply_file_button.setEnabled(file_count > 0)
+                self.clear_file_button.setEnabled(file_count > 0)
+                self.apply_folder_button.setEnabled(folder_count > 0)
+                self.clear_folder_button.setEnabled(folder_count > 0)
+            if hasattr(self, "cancel_button"):
+                self.cancel_button.setEnabled(active_count > 0)
+
+        def _update_publish_fields(self, *_args) -> None:
+            if not hasattr(self, "mode_combo"):
+                return
+            mode = str(self.mode_combo.currentData() or "auto")
+            self.tailscale_port_combo.setEnabled(mode in {"auto", "tailscale"})
+            uploads_enabled = self.upload_enabled_check.isChecked()
+            self.upload_dir_edit.setEnabled(uploads_enabled)
+            self.choose_upload_dir_button.setEnabled(uploads_enabled)
+
+        def _selected_ids(self, table: Any) -> list[str]:
             rows = sorted({index.row() for index in table.selectedIndexes()})
             ids: list[str] = []
             for row in rows:
@@ -2944,10 +3284,14 @@ def run_integrated_admin_app() -> int:
 
         def _build_files_tab(self) -> None:
             layout = QVBoxLayout(self.files_tab)
-            layout.setSpacing(8)
-            layout.setContentsMargins(10, 10, 10, 10)
+            layout.setSpacing(10)
+            layout.setContentsMargins(16, 16, 16, 16)
+
+            self.files_intro_label = self._intro_label()
+            layout.addWidget(self.files_intro_label)
 
             top_actions = QHBoxLayout()
+            top_actions.setSpacing(8)
             self.add_files_button = QPushButton("")
             self.add_files_button.clicked.connect(self.add_files_dialog)
             self.add_folder_button = self._secondary_button("")
@@ -2968,23 +3312,37 @@ def run_integrated_admin_app() -> int:
             top_actions.addWidget(self.include_subfolders_check)
             layout.addLayout(top_actions)
 
+            self.files_group = QGroupBox("")
+            files_layout = QVBoxLayout(self.files_group)
+            files_layout.setContentsMargins(10, 12, 10, 10)
             self.file_table = self._table(["", "", "", "", ""])
-            self.file_table.setMinimumHeight(240)
+            self.file_table.setMinimumHeight(220)
             self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
             self.file_table.customContextMenuRequested.connect(self.show_file_context_menu)
-            layout.addWidget(self.file_table, 2)
+            self.file_table.itemSelectionChanged.connect(self._update_action_state)
+            files_layout.addWidget(self.file_table)
+            layout.addWidget(self.files_group, 2)
 
+            self.folders_group = QGroupBox("")
+            folders_layout = QVBoxLayout(self.folders_group)
+            folders_layout.setContentsMargins(10, 12, 10, 10)
             self.folder_table = self._table(["", "", "", ""])
-            self.folder_table.setMinimumHeight(160)
+            self.folder_table.setMinimumHeight(145)
             self.folder_table.setContextMenuPolicy(Qt.CustomContextMenu)
             self.folder_table.customContextMenuRequested.connect(self.show_folder_context_menu)
-            layout.addWidget(self.folder_table, 1)
+            self.folder_table.itemSelectionChanged.connect(self._update_action_state)
+            folders_layout.addWidget(self.folder_table)
+            layout.addWidget(self.folders_group, 1)
 
         def _build_publish_tab(self) -> None:
             layout = QVBoxLayout(self.publish_tab)
-            layout.setSpacing(8)
-            layout.setContentsMargins(10, 10, 10, 10)
+            layout.setSpacing(12)
+            layout.setContentsMargins(16, 16, 16, 16)
+            self.publish_intro_label = self._intro_label()
+            layout.addWidget(self.publish_intro_label)
+
             self.publish_indicators_box = QHBoxLayout()
+            self.publish_indicators_box.setSpacing(8)
             self.indicator_global = QLabel("")
             self.indicator_upload_guard = QLabel("")
             self.indicator_protected_files = QLabel("")
@@ -3000,14 +3358,22 @@ def run_integrated_admin_app() -> int:
             self.publish_indicators_box.addStretch(1)
             layout.addLayout(self.publish_indicators_box)
 
+            self.publish_connection_group = QGroupBox("")
+            connection_layout = QVBoxLayout(self.publish_connection_group)
+            connection_layout.setContentsMargins(14, 16, 14, 14)
+            connection_layout.setSpacing(12)
             form = QFormLayout()
-            form.setVerticalSpacing(8)
+            form.setHorizontalSpacing(18)
+            form.setVerticalSpacing(10)
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
             self.mode_combo = QComboBox()
+            self.mode_combo.currentIndexChanged.connect(self._update_publish_fields)
             self.port_edit = QLineEdit("80")
             self.manual_port_check = QCheckBox("")
             self.tailscale_port_combo = QComboBox()
             self.tailscale_port_combo.addItems(TAILSCALE_PUBLIC_PORTS)
             self.upload_enabled_check = QCheckBox("")
+            self.upload_enabled_check.toggled.connect(self._update_publish_fields)
             self.upload_dir_edit = QLineEdit(str(DEFAULT_UPLOAD_DIR))
             upload_dir_widget = QWidget()
             upload_dir_row = QHBoxLayout(upload_dir_widget)
@@ -3028,30 +3394,50 @@ def run_integrated_admin_app() -> int:
             form.addRow(self.publish_tailscale_label, self.tailscale_port_combo)
             form.addRow("", self.upload_enabled_check)
             form.addRow(self.publish_upload_dir_label, upload_dir_widget)
-            layout.addLayout(form)
+            connection_layout.addLayout(form)
 
             actions = QHBoxLayout()
+            actions.setSpacing(8)
             self.start_button = QPushButton("")
             self.start_button.clicked.connect(self.start_publish)
             self.stop_button = self._secondary_button("")
             self.stop_button.clicked.connect(self.stop_publish)
-            self.copy_button = self._secondary_button("")
-            self.copy_button.clicked.connect(self.copy_share_url)
             actions.addWidget(self.start_button)
             actions.addWidget(self.stop_button)
-            actions.addWidget(self.copy_button)
             actions.addStretch(1)
-            layout.addLayout(actions)
+            connection_layout.addLayout(actions)
+            layout.addWidget(self.publish_connection_group)
 
+            self.publish_url_group = QGroupBox("")
+            url_layout = QHBoxLayout(self.publish_url_group)
+            url_layout.setContentsMargins(14, 16, 14, 14)
+            url_layout.setSpacing(8)
             self.share_url_edit = QLineEdit("")
             self.share_url_edit.setReadOnly(True)
-            layout.addWidget(self.share_url_edit)
+            url_layout.addWidget(self.share_url_edit, 1)
+            self.copy_button = self._secondary_button("")
+            self.copy_button.clicked.connect(self.copy_share_url)
+            url_layout.addWidget(self.copy_button)
+            layout.addWidget(self.publish_url_group)
             layout.addStretch(1)
 
         def _build_security_tab(self) -> None:
             layout = QVBoxLayout(self.security_tab)
-            layout.setSpacing(8)
-            layout.setContentsMargins(10, 10, 10, 10)
+            layout.setSpacing(10)
+            layout.setContentsMargins(16, 16, 16, 16)
+            self.security_intro_label = self._intro_label()
+            layout.addWidget(self.security_intro_label)
+
+            security_grid = QGridLayout()
+            security_grid.setHorizontalSpacing(12)
+            security_grid.setVerticalSpacing(12)
+            security_grid.setColumnStretch(0, 1)
+            security_grid.setColumnStretch(1, 1)
+
+            self.security_session_group = QGroupBox("")
+            session_layout = QVBoxLayout(self.security_session_group)
+            session_layout.setContentsMargins(14, 16, 14, 14)
+            session_layout.setSpacing(8)
             self.global_password_edit = QLineEdit()
             self.global_password_edit.setEchoMode(QLineEdit.Password)
             global_row = QHBoxLayout()
@@ -3064,6 +3450,14 @@ def run_integrated_admin_app() -> int:
             global_row.addWidget(self.apply_global_button)
             global_row.addWidget(self.clear_global_button)
 
+            self.security_global_label = QLabel("")
+            session_layout.addWidget(self.security_global_label)
+            session_layout.addLayout(global_row)
+
+            self.security_selection_group = QGroupBox("")
+            selection_layout = QVBoxLayout(self.security_selection_group)
+            selection_layout.setContentsMargins(14, 16, 14, 14)
+            selection_layout.setSpacing(8)
             self.selection_password_edit = QLineEdit()
             self.selection_password_edit.setEchoMode(QLineEdit.Password)
             file_row = QGridLayout()
@@ -3082,6 +3476,15 @@ def run_integrated_admin_app() -> int:
             file_row.addWidget(self.apply_folder_button, 1, 0)
             file_row.addWidget(self.clear_folder_button, 1, 1)
 
+            self.security_selection_label = QLabel("")
+            selection_layout.addWidget(self.security_selection_label)
+            selection_layout.addWidget(self.selection_password_edit)
+            selection_layout.addLayout(file_row)
+
+            self.security_rules_group = QGroupBox("")
+            rules_layout = QVBoxLayout(self.security_rules_group)
+            rules_layout.setContentsMargins(14, 16, 14, 14)
+            rules_layout.setSpacing(9)
             self.expiration_spin = QSpinBox()
             self.expiration_spin.setRange(0, 525600)
             self.download_limit_spin = QSpinBox()
@@ -3090,6 +3493,21 @@ def run_integrated_admin_app() -> int:
             self.save_security_button = QPushButton("")
             self.save_security_button.clicked.connect(self.save_security_options)
 
+            self.security_expire_label = QLabel("")
+            self.security_download_label = QLabel("")
+            rules_form = QFormLayout()
+            rules_form.setHorizontalSpacing(14)
+            rules_form.setVerticalSpacing(9)
+            rules_form.addRow(self.security_expire_label, self.expiration_spin)
+            rules_form.addRow(self.security_download_label, self.download_limit_spin)
+            rules_layout.addLayout(rules_form)
+            rules_layout.addWidget(self.uploads_require_global_check)
+            rules_layout.addWidget(self.save_security_button, 0, Qt.AlignLeft)
+
+            self.security_network_group = QGroupBox("")
+            network_layout = QVBoxLayout(self.security_network_group)
+            network_layout.setContentsMargins(14, 16, 14, 14)
+            network_layout.setSpacing(8)
             ip_row = QHBoxLayout()
             self.ip_edit = QLineEdit()
             self.block_ip_button = QPushButton("")
@@ -3099,34 +3517,27 @@ def run_integrated_admin_app() -> int:
             ip_row.addWidget(self.ip_edit, 1)
             ip_row.addWidget(self.block_ip_button)
             ip_row.addWidget(self.unblock_ip_button)
-
-            self.security_global_label = QLabel("")
-            self.security_selection_label = QLabel("")
-            self.security_expire_label = QLabel("")
-            self.security_download_label = QLabel("")
-
-            layout.addWidget(self.security_global_label)
-            layout.addLayout(global_row)
-            layout.addWidget(self.security_selection_label)
-            layout.addWidget(self.selection_password_edit)
-            layout.addLayout(file_row)
-            layout.addWidget(self.security_expire_label)
-            layout.addWidget(self.expiration_spin)
-            layout.addWidget(self.security_download_label)
-            layout.addWidget(self.download_limit_spin)
-            layout.addWidget(self.uploads_require_global_check)
-            layout.addWidget(self.save_security_button)
-            layout.addLayout(ip_row)
             self.security_summary = QLabel("")
-            self.security_summary.setStyleSheet("color: #5d6778;")
-            layout.addWidget(self.security_summary)
+            self.security_summary.setObjectName("subtleText")
+            self.security_summary.setWordWrap(True)
+            network_layout.addLayout(ip_row)
+            network_layout.addWidget(self.security_summary)
+
+            security_grid.addWidget(self.security_session_group, 0, 0)
+            security_grid.addWidget(self.security_selection_group, 0, 1)
+            security_grid.addWidget(self.security_rules_group, 1, 0)
+            security_grid.addWidget(self.security_network_group, 1, 1)
+            layout.addLayout(security_grid)
             layout.addStretch(1)
 
         def _build_activity_tab(self) -> None:
             layout = QVBoxLayout(self.activity_tab)
-            layout.setSpacing(8)
-            layout.setContentsMargins(10, 10, 10, 10)
+            layout.setSpacing(10)
+            layout.setContentsMargins(16, 16, 16, 16)
+            self.activity_intro_label = self._intro_label()
+            layout.addWidget(self.activity_intro_label)
             metrics = QHBoxLayout()
+            metrics.setSpacing(8)
             self.completed_label = QLabel("")
             self.completed_label.setObjectName("metricBadge")
             self.cancelled_label = QLabel("")
@@ -3139,26 +3550,44 @@ def run_integrated_admin_app() -> int:
             metrics.addStretch(1)
             layout.addLayout(metrics)
 
+            self.activity_active_group = QGroupBox("")
+            active_layout = QVBoxLayout(self.activity_active_group)
+            active_layout.setContentsMargins(10, 14, 10, 10)
+            active_layout.setSpacing(8)
             top = QHBoxLayout()
             self.cancel_button = self._secondary_button("")
             self.cancel_button.clicked.connect(self.cancel_selected_transfer)
+            top.addWidget(self.cancel_button)
+            top.addStretch(1)
+            active_layout.addLayout(top)
+            self.active_table = self._table(["", "", "", "", "", ""])
+            self.active_table.setMinimumHeight(115)
+            self.active_table.itemSelectionChanged.connect(self._update_action_state)
+            active_layout.addWidget(self.active_table)
+            layout.addWidget(self.activity_active_group, 1)
+
+            self.activity_history_group = QGroupBox("")
+            history_layout = QVBoxLayout(self.activity_history_group)
+            history_layout.setContentsMargins(10, 14, 10, 10)
+            history_layout.setSpacing(8)
+            history_actions = QHBoxLayout()
             self.export_button = self._secondary_button("")
             self.export_button.clicked.connect(self.export_history_csv)
-            top.addWidget(self.cancel_button)
-            top.addWidget(self.export_button)
-            top.addStretch(1)
-            layout.addLayout(top)
-            self.active_table = self._table(["", "", "", "", "", ""])
-            self.active_table.setMinimumHeight(140)
+            history_actions.addWidget(self.export_button)
+            history_actions.addStretch(1)
+            history_layout.addLayout(history_actions)
             self.history_table = self._table(["", "", "", "", "", "", ""])
-            layout.addWidget(self.active_table, 1)
-            layout.addWidget(self.history_table, 2)
-            self.log_title_label = QLabel("")
-            layout.addWidget(self.log_title_label)
+            history_layout.addWidget(self.history_table)
+            layout.addWidget(self.activity_history_group, 2)
+
+            self.activity_log_group = QGroupBox("")
+            log_layout = QVBoxLayout(self.activity_log_group)
+            log_layout.setContentsMargins(10, 14, 10, 10)
             self.log_text = QPlainTextEdit()
             self.log_text.setReadOnly(True)
-            self.log_text.setMinimumHeight(130)
-            layout.addWidget(self.log_text)
+            self.log_text.setMinimumHeight(105)
+            log_layout.addWidget(self.log_text)
+            layout.addWidget(self.activity_log_group, 1)
 
         def _prompt_password(self, title: str, label: str) -> str | None:
             password, accepted = QInputDialog.getText(self, title, label, QLineEdit.Password)
@@ -3166,7 +3595,7 @@ def run_integrated_admin_app() -> int:
                 return None
             return password
 
-        def _focus_row(self, table: QTableWidget, row: int) -> None:
+        def _focus_row(self, table: Any, row: int) -> None:
             if row >= 0:
                 table.selectRow(row)
 
@@ -3440,7 +3869,7 @@ def run_integrated_admin_app() -> int:
             self.controller.log(f"History exported: {path}")
             self.refresh_state()
 
-        def _set_row(self, table: QTableWidget, row: int, values: list[str], row_id: str = "") -> None:
+        def _set_row(self, table: Any, row: int, values: list[str], row_id: str = "") -> None:
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if col == 0 and row_id:
@@ -3448,6 +3877,9 @@ def run_integrated_admin_app() -> int:
                 table.setItem(row, col, item)
 
         def refresh_state(self) -> None:
+            selected_file_ids = set(self._selected_ids(self.file_table))
+            selected_folder_ids = set(self._selected_ids(self.folder_table))
+            selected_transfer_ids = set(self._selected_ids(self.active_table))
             state = self.controller.serialize()
             if state.get("ui_language") != self.controller.ui_language:
                 self.controller.set_ui_language(str(state.get("ui_language") or "en"), persist=False)
@@ -3460,7 +3892,12 @@ def run_integrated_admin_app() -> int:
                 self.language_combo.setCurrentIndex(combo_index)
                 self.language_combo.blockSignals(False)
 
+            status_code = str(state.get("status_code") or "ready")
             self.status_label.setText(f"{self._t('status_prefix')}: {state['status']}")
+            if self.status_label.property("statusCode") != status_code:
+                self.status_label.setProperty("statusCode", status_code)
+                self.status_label.style().unpolish(self.status_label)
+                self.status_label.style().polish(self.status_label)
             self.recommendation_label.setText(state.get("recommendation", ""))
             self.share_url_edit.setText(state.get("share_url", ""))
 
@@ -3490,8 +3927,11 @@ def run_integrated_admin_app() -> int:
                 self.download_limit_spin.setValue(int(security.get("download_limit_per_file") or 0))
                 self.uploads_require_global_check.setChecked(bool(security.get("uploads_require_global")))
                 self._prefs_applied = True
+                self._update_publish_fields()
 
             files = state.get("files", [])
+            self.file_table.blockSignals(True)
+            self.file_table.setUpdatesEnabled(False)
             self.file_table.setRowCount(len(files))
             for row, item in enumerate(files):
                 self._set_row(
@@ -3506,8 +3946,14 @@ def run_integrated_admin_app() -> int:
                     ],
                     str(item.get("id", "")),
                 )
+            self._restore_selected_ids(self.file_table, selected_file_ids)
+            self.file_table.setUpdatesEnabled(True)
+            self.file_table.blockSignals(False)
+            self.files_group.setTitle(f"{self._t('files_group')}  ·  {len(files)}")
 
             folders = state.get("folders", [])
+            self.folder_table.blockSignals(True)
+            self.folder_table.setUpdatesEnabled(False)
             self.folder_table.setRowCount(len(folders))
             for row, item in enumerate(folders):
                 self._set_row(
@@ -3521,8 +3967,14 @@ def run_integrated_admin_app() -> int:
                     ],
                     str(item.get("id", "")),
                 )
+            self._restore_selected_ids(self.folder_table, selected_folder_ids)
+            self.folder_table.setUpdatesEnabled(True)
+            self.folder_table.blockSignals(False)
+            self.folders_group.setTitle(f"{self._t('folders_group')}  ·  {len(folders)}")
 
             active = state.get("active", [])
+            self.active_table.blockSignals(True)
+            self.active_table.setUpdatesEnabled(False)
             self.active_table.setRowCount(len(active))
             for row, item in enumerate(active):
                 self._set_row(
@@ -3538,8 +3990,15 @@ def run_integrated_admin_app() -> int:
                     ],
                     str(item.get("id", "")),
                 )
+            self._restore_selected_ids(self.active_table, selected_transfer_ids)
+            self.active_table.setUpdatesEnabled(True)
+            self.active_table.blockSignals(False)
+            self.activity_active_group.setTitle(
+                f"{self._t('activity_active_group')}  ·  {len(active)}"
+            )
 
             history = state.get("history", [])[:200]
+            self.history_table.setUpdatesEnabled(False)
             self.history_table.setRowCount(len(history))
             for row, item in enumerate(history):
                 self._set_row(
@@ -3556,6 +4015,10 @@ def run_integrated_admin_app() -> int:
                     ],
                     str(item.get("id", "")),
                 )
+            self.history_table.setUpdatesEnabled(True)
+            self.activity_history_group.setTitle(
+                f"{self._t('activity_history_group')}  ·  {len(history)}"
+            )
 
             security = state.get("security", {})
             blocked = security.get("blocked_ips", [])
@@ -3584,6 +4047,13 @@ def run_integrated_admin_app() -> int:
             self.completed_label.setText(f"{self._t('activity_completed')}: {completed}")
             self.cancelled_label.setText(f"{self._t('activity_cancelled')}: {cancelled}")
             self.failed_label.setText(f"{self._t('activity_failed')}: {failed}")
+
+            self.start_button.setEnabled(bool(state.get("can_publish")))
+            self.stop_button.setEnabled(
+                bool(state.get("share_running")) or bool(state.get("tunnel_running"))
+            )
+            self.copy_button.setEnabled(bool(state.get("share_url")))
+            self._update_action_state()
 
             log_dump = "\n".join(state.get("logs", []))
             if log_dump != self._last_log_dump:
@@ -3620,10 +4090,11 @@ def run_integrated_admin_app() -> int:
 
 
 BASE_AUTH_CSS = """
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:#eef3f6;font-family:"Segoe UI",system-ui,sans-serif;color:#17212b}
-.auth{width:min(420px,calc(100% - 28px));background:#fff;border:1px solid #dce6ec;border-radius:8px;padding:24px;box-shadow:0 18px 45px rgba(23,33,43,.1)}
-h1{margin:0 0 8px;font-size:1.6rem}p{color:#607080;line-height:1.45}input{width:100%;padding:12px;border:1px solid #dce6ec;border-radius:8px;margin:8px 0 12px}
-button{width:100%;padding:12px;border:0;border-radius:8px;background:#0f8a7a;color:#fff;font-weight:760}.error{background:#ffe3df;border:1px solid #f3b2aa;color:#7b2016;padding:10px;border-radius:8px;margin:10px 0}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 15% 10%,#dff3ee 0,transparent 35%),#f3f7f7;font-family:"Segoe UI",system-ui,sans-serif;color:#17212b}
+.auth{width:min(430px,100%);background:#fff;border:1px solid #dce7e5;border-radius:18px;padding:30px;box-shadow:0 24px 65px rgba(31,48,62,.12)}
+.auth:before{content:"FT";display:grid;place-items:center;width:46px;height:46px;margin-bottom:20px;border-radius:12px;background:#0f8a7a;color:#fff;font-weight:850;font-size:1.05rem;letter-spacing:.02em}
+h1{margin:0 0 8px;font-size:1.65rem;letter-spacing:-.02em}p{color:#60706e;line-height:1.55;margin:0 0 18px}form{display:grid;gap:12px}input{width:100%;min-height:46px;padding:0 13px;border:1px solid #b9c9c6;border-radius:9px;background:#fff;color:#17212b;font:inherit}input:focus{outline:3px solid rgba(15,138,122,.16);border-color:#0f8a7a}
+button{width:100%;min-height:46px;padding:0 14px;border:1px solid #0f8a7a;border-radius:9px;background:#0f8a7a;color:#fff;font:inherit;font-weight:720;cursor:pointer}button:hover{background:#0b776a}button:focus-visible{outline:3px solid rgba(15,138,122,.25);outline-offset:2px}.error{background:#ffe8e4;border:1px solid #efb9b1;color:#842d23;padding:11px 12px;border-radius:9px;margin:0 0 14px}
 """
 
 AUTH_CSS = BASE_AUTH_CSS
@@ -3643,7 +4114,7 @@ CLIENT_LOGIN_HTML = r"""
     <p>{{ web.auth_message }}</p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post" action="{{ url_for('auth_global', token=token) }}">
-      <input name="password" type="password" placeholder="{{ web.auth_password_placeholder }}" autofocus>
+      <input name="password" type="password" placeholder="{{ web.auth_password_placeholder }}" aria-label="{{ web.auth_password_placeholder }}" autocomplete="current-password" required autofocus>
       <button type="submit">{{ web.auth_submit }}</button>
     </form>
   </main>
@@ -3666,7 +4137,7 @@ FILE_PASSWORD_HTML = r"""
     <p>{{ web.file_lock_message }}</p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post" action="{{ url_for('unlock_file', token=token, file_id=file_id) }}">
-      <input name="password" type="password" placeholder="{{ web.unlock_file_placeholder }}" autofocus>
+      <input name="password" type="password" placeholder="{{ web.unlock_file_placeholder }}" aria-label="{{ web.unlock_file_placeholder }}" autocomplete="current-password" required autofocus>
       <button type="submit">{{ web.file_lock_submit }}</button>
     </form>
   </main>
@@ -3689,7 +4160,7 @@ FOLDER_PASSWORD_HTML = r"""
     <p>{{ web.folder_lock_message }}</p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post" action="{{ url_for('unlock_folder', token=token, folder_id=folder_id) }}">
-      <input name="password" type="password" placeholder="{{ web.folder_password_placeholder }}" autofocus>
+      <input name="password" type="password" placeholder="{{ web.folder_password_placeholder }}" aria-label="{{ web.folder_password_placeholder }}" autocomplete="current-password" required autofocus>
       <button type="submit">{{ web.folder_lock_submit }}</button>
     </form>
   </main>
@@ -3703,6 +4174,7 @@ CLIENT_HTML = r"""
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f7f7">
   <title>File Transfer Easy</title>
   <link rel="stylesheet" href="{{ url_for('client_css', token=token) }}">
 </head>
@@ -3720,11 +4192,11 @@ CLIENT_HTML = r"""
       </div>
     </header>
     <section class="layout">
-      <div class="file-list">
+      <div class="file-list" id="shared-files">
         {% if files %}
           {% for item in files %}
             <article class="file-card">
-              <div class="file-icon" aria-hidden="true">{{ item.display_name[:1].upper() or "F" }}</div>
+              <div class="file-icon" aria-hidden="true">{{ item.extension_label }}</div>
               <div class="file-title">
                 <a href="{{ url_for('download_file', token=token, file_id=item.id) }}">{{ item.display_name }}</a>
                 <div class="file-meta">
@@ -3736,7 +4208,7 @@ CLIENT_HTML = r"""
                 </div>
                 {% if item.protected and item.id not in unlocked_files and item.folder_id not in unlocked_folders %}
                   <form class="unlock" method="post" action="{{ url_for('unlock_file', token=token, file_id=item.id) }}">
-                    <input name="password" type="password" placeholder="{{ web.unlock_file_placeholder }}">
+                    <input name="password" type="password" placeholder="{{ web.unlock_file_placeholder }}" aria-label="{{ web.unlock_file_placeholder }}" autocomplete="current-password" required>
                     <button type="submit">{{ web.file_lock_submit }}</button>
                   </form>
                 {% endif %}
@@ -3762,7 +4234,7 @@ CLIENT_HTML = r"""
                 <span>{{ folder.name }}</span>
                 {% if folder.protected and folder.id not in unlocked_folders %}
                   <form method="post" action="{{ url_for('unlock_folder', token=token, folder_id=folder.id) }}">
-                    <input name="password" type="password" placeholder="{{ web.folder_password_placeholder }}">
+                    <input name="password" type="password" placeholder="{{ web.folder_password_placeholder }}" aria-label="{{ web.folder_password_placeholder }}" autocomplete="current-password" required>
                     <button type="submit">{{ web.folder_ok }}</button>
                   </form>
                 {% else %}
@@ -3776,10 +4248,10 @@ CLIENT_HTML = r"""
         <form class="upload-zone" id="upload-zone" {% if not upload_enabled %}hidden{% endif %}>
           <strong>{{ web.upload_title }}</strong>
           <p>{{ web.upload_help }}</p>
-          <input class="file-input" id="file-input" name="files" type="file" multiple>
+          <input class="file-input" id="file-input" name="files" type="file" aria-label="{{ web.upload_choose }}" multiple>
           <button class="upload-button" type="button" id="choose-files">{{ web.upload_choose }}</button>
-          <progress id="upload-progress" value="0" max="100" hidden></progress>
-          <div class="message" id="message"></div>
+          <progress id="upload-progress" value="0" max="100" aria-label="{{ web.upload_title }}" hidden></progress>
+          <div class="message" id="message" role="status" aria-live="polite"></div>
         </form>
       </aside>
     </section>
@@ -3796,9 +4268,12 @@ CLIENT_JS = r"""
 const token=window.SHARE_TOKEN;
 const text=window.CLIENT_TEXT||{};
 const zone=document.getElementById("upload-zone"),disabled=document.getElementById("upload-disabled"),input=document.getElementById("file-input"),button=document.getElementById("choose-files"),message=document.getElementById("message"),progress=document.getElementById("upload-progress");
-async function refreshStatus(){const r=await fetch(`/s/${token}/status`,{cache:"no-store"});if(!r.ok)return;const s=await r.json();if(zone)zone.hidden=!s.upload_enabled;if(disabled)disabled.hidden=s.upload_enabled}
-async function uploadFiles(files){await refreshStatus();if(zone&&zone.hidden){if(message)message.textContent=text.upload_msg_disabled||"";return}if(!files||files.length===0)return;const f=new FormData();for(const file of files)f.append("files",file);if(progress){progress.hidden=false;progress.value=15}if(message)message.textContent=text.upload_msg_sending||"";try{const r=await fetch(`/s/${token}/upload`,{method:"POST",body:f,cache:"no-store"});if(progress)progress.value=100;const d=await r.json();if(message)message.textContent=d.message||text.upload_msg_done||"";if(r.ok)setTimeout(()=>window.location.reload(),800)}catch{if(message)message.textContent=text.upload_msg_failed||""}finally{if(input)input.value="";setTimeout(()=>{if(progress){progress.hidden=true;progress.value=0}},900)}}
-if(zone&&input&&button){button.addEventListener("click",()=>input.click());input.addEventListener("change",()=>uploadFiles(input.files));["dragenter","dragover"].forEach(n=>zone.addEventListener(n,e=>{e.preventDefault();zone.classList.add("drag")}));["dragleave","drop"].forEach(n=>zone.addEventListener(n,e=>{e.preventDefault();zone.classList.remove("drag")}));zone.addEventListener("drop",e=>uploadFiles(e.dataTransfer.files))}
+let uploading=false;
+function setMessage(value,status=""){if(!message)return;message.textContent=value||"";message.dataset.status=status}
+async function refreshStatus(){try{const r=await fetch(`/s/${token}/status`,{cache:"no-store"});if(!r.ok)return;const s=await r.json();if(zone)zone.hidden=!s.upload_enabled;if(disabled)disabled.hidden=s.upload_enabled}catch{}}
+function sendUpload(formData){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST",`/s/${token}/upload`);xhr.setRequestHeader("Cache-Control","no-store");xhr.upload.addEventListener("progress",event=>{if(progress&&event.lengthComputable)progress.value=Math.round((event.loaded/event.total)*100)});xhr.addEventListener("load",()=>resolve(xhr));xhr.addEventListener("error",()=>reject(new Error("network")));xhr.send(formData)})}
+async function uploadFiles(files){if(uploading||!files||files.length===0)return;await refreshStatus();if(zone&&zone.hidden){setMessage(text.upload_msg_disabled||"","error");return}const formData=new FormData();for(const file of files)formData.append("files",file);uploading=true;if(zone)zone.setAttribute("aria-busy","true");if(button)button.disabled=true;if(progress){progress.hidden=false;progress.value=0}setMessage(text.upload_msg_sending||"");try{const xhr=await sendUpload(formData);if(progress)progress.value=100;let data={};try{data=JSON.parse(xhr.responseText||"{}")}catch{}if(xhr.status>=200&&xhr.status<300){setMessage(data.message||text.upload_msg_done||"","success");setTimeout(()=>window.location.reload(),700)}else{setMessage(data.message||text.upload_msg_failed||"","error")}}catch{setMessage(text.upload_msg_failed||"","error")}finally{uploading=false;if(zone)zone.removeAttribute("aria-busy");if(button)button.disabled=false;if(input)input.value="";setTimeout(()=>{if(progress){progress.hidden=true;progress.value=0}},1000)}}
+if(zone&&input&&button){button.addEventListener("click",()=>input.click());input.addEventListener("change",()=>uploadFiles(input.files));["dragenter","dragover"].forEach(name=>zone.addEventListener(name,event=>{event.preventDefault();if(!uploading)zone.classList.add("drag")}));["dragleave","drop"].forEach(name=>zone.addEventListener(name,event=>{event.preventDefault();zone.classList.remove("drag")}));zone.addEventListener("drop",event=>uploadFiles(event.dataTransfer.files))}
 refreshStatus();setInterval(refreshStatus,2500);
 """
 
@@ -3807,8 +4282,116 @@ refreshStatus();setInterval(refreshStatus,2500);
 
 
 CLIENT_CSS = r"""
-:root{--ink:#17212b;--muted:#607080;--line:rgba(255,255,255,.58);--glass:rgba(255,255,255,.66);--teal:#0f8a7a;--teal-dark:#0a655c;--coral:#ec6d5f;--shadow:0 24px 70px rgba(31,48,62,.15)}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(135deg,#f4faf8 0%,#e9f1f5 48%,#f7f2ef 100%);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;letter-spacing:0}body:before{content:"";position:fixed;inset:0;background:linear-gradient(120deg,rgba(15,138,122,.12),transparent 42%,rgba(236,109,95,.12));pointer-events:none}.shell{position:relative;z-index:1;width:min(1120px,calc(100% - 32px));margin:0 auto;padding:30px 0 38px}.topbar{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:end;padding:18px;margin-bottom:18px;border-radius:8px;background:var(--glass);border:1px solid var(--line);box-shadow:var(--shadow);backdrop-filter:blur(24px)}.eyebrow{color:var(--teal-dark);font-weight:780;margin:0 0 8px}h1{margin:0;font-size:2rem;line-height:1.1}.subtitle{margin:10px 0 0;color:var(--muted);line-height:1.5}.stats{display:flex;gap:10px}.stat,.file-card,.tool-panel,.empty{background:var(--glass);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);backdrop-filter:blur(24px)}.stat{min-width:112px;padding:12px 14px}.stat strong{display:block;font-size:1.2rem}.stat span{color:var(--muted);font-size:.85rem}.layout{display:grid;grid-template-columns:minmax(0,1fr)340px;gap:18px;align-items:start}.file-list{display:grid;gap:10px}.file-card{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px}.file-icon{width:44px;height:44px;border-radius:8px;background:linear-gradient(145deg,#d8f3ea,#fff);color:var(--teal-dark);display:grid;place-items:center;font-weight:900;border:1px solid rgba(15,138,122,.18)}.file-title{min-width:0}.file-title a{color:var(--ink);text-decoration:none;font-weight:780;overflow-wrap:anywhere}.file-meta{color:var(--muted);display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:6px;font-size:.92rem}.pill{color:#7b2016;background:#ffe3df;border-radius:999px;padding:1px 8px}.download,.upload-button{border:1px solid rgba(255,255,255,.55);border-radius:8px;color:#fff;background:linear-gradient(180deg,var(--teal),var(--teal-dark));padding:11px 14px;min-width:112px;cursor:pointer;font-weight:760;text-decoration:none;text-align:center;box-shadow:0 10px 26px rgba(15,138,122,.2)}.download:hover,.upload-button:hover{filter:brightness(1.03)}.tool-panel{padding:18px;position:sticky;top:16px}.tool-panel h2{margin:0;font-size:1.15rem}.tool-panel p{margin:8px 0 0;color:var(--muted);line-height:1.45}.secondary{display:block;text-align:center;border:1px solid rgba(23,33,43,.1);color:var(--ink);background:rgba(255,255,255,.56);border-radius:8px;padding:11px 14px;text-decoration:none;font-weight:720;margin-top:12px}.folder-box{margin-top:18px;display:grid;gap:10px}.folder-line{border:1px solid rgba(23,33,43,.08);background:rgba(255,255,255,.5);border-radius:8px;padding:10px}.folder-line form{display:grid;grid-template-columns:1fr auto;gap:6px;margin-top:8px}.folder-line input,.unlock input{width:100%;padding:10px;border:1px solid rgba(23,33,43,.12);border-radius:8px;background:rgba(255,255,255,.72)}.folder-line button,.unlock button{border:0;border-radius:8px;background:var(--ink);color:#fff;padding:10px;font-weight:750}.upload-zone{margin-top:18px;border:2px dashed rgba(15,138,122,.35);background:rgba(244,251,249,.68);border-radius:8px;padding:18px;text-align:center}.upload-zone.drag{border-color:var(--coral);background:#fff3f1}.file-input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.notice,.unlock{margin-top:12px;padding:12px;border-radius:8px;background:rgba(255,248,223,.8);color:#684a08;border:1px solid #efd997;font-size:.94rem}.message{min-height:22px;margin-top:12px;color:var(--muted);font-size:.94rem}progress{width:100%;margin-top:12px;accent-color:var(--teal)}.empty{min-height:260px;display:grid;place-items:center;text-align:center;padding:28px}.empty span{color:var(--muted);margin-top:8px;display:block}@media(max-width:860px){.topbar,.layout{grid-template-columns:1fr}.tool-panel{position:static}}@media(max-width:620px){.shell{width:min(100% - 20px,1120px);padding-top:18px}h1{font-size:1.55rem}.file-card{grid-template-columns:40px minmax(0,1fr)}.download{grid-column:1/-1;width:100%}.stats{flex-direction:column}}
+:root {
+  color-scheme: light;
+  --ink: #17212b;
+  --muted: #60706e;
+  --line: #dce7e5;
+  --line-strong: #b9c9c6;
+  --surface: #ffffff;
+  --surface-soft: #f3f7f7;
+  --teal: #0f8a7a;
+  --teal-dark: #08685d;
+  --teal-soft: #dff3ee;
+  --coral: #d95f52;
+  --shadow: 0 20px 55px rgba(31, 48, 62, .1);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at 8% 0, #dff3ee 0, transparent 32%), var(--surface-soft);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+button, input { font: inherit; }
+a, button, input { -webkit-tap-highlight-color: transparent; }
+a:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 3px solid rgba(15, 138, 122, .24);
+  outline-offset: 2px;
+}
+.shell { width: min(1120px, calc(100% - 36px)); margin: 0 auto; padding: 34px 0 42px; }
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: end;
+  padding: 24px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.eyebrow { color: var(--teal-dark); font-size: .82rem; font-weight: 800; letter-spacing: .08em; margin: 0 0 9px; text-transform: uppercase; }
+h1 { margin: 0; font-size: clamp(1.75rem, 4vw, 2.35rem); line-height: 1.08; letter-spacing: -.035em; }
+.subtitle { max-width: 680px; margin: 11px 0 0; color: var(--muted); line-height: 1.55; }
+.stats { display: flex; gap: 10px; }
+.stat { min-width: 112px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.stat strong { display: block; font-size: 1.18rem; }
+.stat span { color: var(--muted); font-size: .84rem; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 342px; gap: 18px; align-items: start; }
+.file-list { display: grid; gap: 10px; }
+.file-card, .tool-panel, .empty {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 8px 25px rgba(31, 48, 62, .055);
+}
+.file-card { display: grid; grid-template-columns: 50px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 15px; transition: border-color .18s ease, transform .18s ease; }
+.file-card:hover { border-color: #b6d3ce; transform: translateY(-1px); }
+.file-icon { width: 50px; height: 50px; padding: 4px; border: 1px solid #b9ddd5; border-radius: 11px; background: var(--teal-soft); color: var(--teal-dark); display: grid; place-items: center; font-size: .67rem; font-weight: 850; letter-spacing: .025em; overflow: hidden; }
+.file-title { min-width: 0; }
+.file-title > a { color: var(--ink); text-decoration: none; font-weight: 750; overflow-wrap: anywhere; }
+.file-title > a:hover { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 3px; }
+.file-meta { color: var(--muted); display: flex; flex-wrap: wrap; gap: 7px 12px; margin-top: 6px; font-size: .88rem; }
+.file-meta span:not(.pill) + span:not(.pill)::before { content: "·"; margin-right: 12px; color: #9baba8; }
+.pill { color: #842d23; background: #ffe8e4; border: 1px solid #f0c2bb; border-radius: 999px; padding: 1px 8px; }
+.download, .upload-button, .folder-line button, .unlock button {
+  min-height: 42px;
+  border: 1px solid var(--teal);
+  border-radius: 9px;
+  color: #fff;
+  background: var(--teal);
+  padding: 0 15px;
+  cursor: pointer;
+  font-weight: 720;
+  text-decoration: none;
+  text-align: center;
+  display: inline-grid;
+  place-items: center;
+}
+.download:hover, .upload-button:hover, .folder-line button:hover, .unlock button:hover { background: var(--teal-dark); border-color: var(--teal-dark); }
+button:disabled { cursor: wait; opacity: .58; }
+.tool-panel { padding: 20px; position: sticky; top: 18px; }
+.tool-panel h2 { margin: 0; font-size: 1.18rem; }
+.tool-panel > p { margin: 8px 0 0; color: var(--muted); line-height: 1.5; }
+.secondary { display: block; min-height: 42px; text-align: center; border: 1px solid var(--line-strong); color: var(--ink); background: var(--surface); border-radius: 9px; padding: 10px 14px; text-decoration: none; font-weight: 700; margin-top: 14px; }
+.secondary:hover { background: var(--surface-soft); border-color: #83a9a2; }
+.folder-box { margin-top: 20px; display: grid; gap: 10px; }
+.folder-line { border: 1px solid var(--line); background: var(--surface-soft); border-radius: 10px; padding: 11px; }
+.folder-line > span, .folder-line > small { display: block; overflow-wrap: anywhere; }
+.folder-line > small { margin-top: 3px; color: var(--muted); }
+.folder-line form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; margin-top: 9px; }
+.folder-line input, .unlock input { width: 100%; min-height: 42px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); }
+.folder-line input:focus, .unlock input:focus { border-color: var(--teal); outline: 3px solid rgba(15, 138, 122, .15); }
+.upload-zone { margin-top: 20px; border: 2px dashed #99c9bf; background: #f2faf8; border-radius: 12px; padding: 20px 16px; text-align: center; transition: border-color .18s ease, background .18s ease; }
+.upload-zone.drag { border-color: var(--coral); background: #fff2f0; }
+.upload-zone[aria-busy="true"] { border-style: solid; }
+.upload-zone p { margin-bottom: 14px; }
+.file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.notice, .unlock { margin-top: 14px; padding: 12px; border-radius: 10px; background: #fff6db; color: #684a08; border: 1px solid #ead28c; font-size: .92rem; }
+.unlock { display: grid; grid-template-columns: minmax(160px, 1fr) auto; gap: 7px; }
+.message { min-height: 22px; margin-top: 12px; color: var(--muted); font-size: .92rem; }
+.message[data-status="success"] { color: #086044; font-weight: 650; }
+.message[data-status="error"] { color: #9a3328; font-weight: 650; }
+progress { width: 100%; height: 8px; margin-top: 14px; border: 0; border-radius: 999px; accent-color: var(--teal); }
+.empty { min-height: 270px; display: grid; place-items: center; text-align: center; padding: 30px; }
+.empty span { color: var(--muted); margin-top: 8px; display: block; }
+@media (max-width: 860px) { .topbar, .layout { grid-template-columns: 1fr; } .tool-panel { position: static; } .stats { justify-self: start; } }
+@media (max-width: 620px) { .shell { width: min(100% - 20px, 1120px); padding-top: 14px; } .topbar { padding: 19px; border-radius: 14px; } .stats { width: 100%; } .stat { flex: 1; min-width: 0; } .file-card { grid-template-columns: 44px minmax(0, 1fr); padding: 13px; } .file-icon { width: 44px; height: 44px; } .download { grid-column: 1 / -1; width: 100%; } .unlock { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 """
 
 ADMIN_HTML = r"""
@@ -3824,9 +4407,9 @@ ADMIN_HTML = r"""
   <main class="shell">
     <header class="top">
       <div>
-        <p class="eyebrow">Asistente de publicacion</p>
+        <p class="eyebrow">Asistente de publicación</p>
         <h1>Comparte archivos en 4 pasos</h1>
-        <p id="recommendation">Empieza anadiendo archivos o una carpeta.</p>
+        <p id="recommendation">Empieza añadiendo archivos o una carpeta.</p>
       </div>
       <div class="top-actions">
         <button data-action="start" class="primary">Publicar ahora</button>
@@ -3843,7 +4426,7 @@ ADMIN_HTML = r"""
     </section>
 
     <nav class="steps" aria-label="Pasos del asistente">
-      <button class="step active" data-nav="step-files"><b>1</b><span>Que compartir</span></button>
+      <button class="step active" data-nav="step-files"><b>1</b><span>Qué compartir</span></button>
       <button class="step" data-nav="step-access"><b>2</b><span>Acceso</span></button>
       <button class="step" data-nav="step-publish"><b>3</b><span>Publicar</span></button>
       <button class="step" data-nav="step-ready"><b>4</b><span>Listo</span></button>
@@ -3851,25 +4434,25 @@ ADMIN_HTML = r"""
 
     <section class="card wizard-panel active" id="step-files" data-section="step-files">
       <div class="section-head">
-        <div><h2>Que quieres compartir?</h2><p>Anade archivos sueltos o una carpeta. Puedes quitar elementos desde la lista.</p></div>
+        <div><h2>¿Qué quieres compartir?</h2><p>Añade archivos sueltos o una carpeta. Puedes quitar elementos desde la lista.</p></div>
         <div class="button-row">
-          <button data-action="pick-files">Anadir archivos</button>
-          <button data-action="pick-folder" class="secondary">Anadir carpeta</button>
+          <button data-action="pick-files">Añadir archivos</button>
+          <button data-action="pick-folder" class="secondary">Añadir carpeta</button>
         </div>
       </div>
-      <label class="inline-check"><input id="include-subfolders" type="checkbox"> Incluir subcarpetas al anadir carpetas</label>
+      <label class="inline-check"><input id="include-subfolders" type="checkbox"> Incluir subcarpetas al añadir carpetas</label>
       <input id="file-search" class="search" placeholder="Buscar en archivos compartidos">
       <div id="files-list" class="item-list"></div>
       <div id="folders-list" class="item-list compact"></div>
     </section>
 
     <section class="card wizard-panel" id="step-access" data-section="step-access">
-      <div class="section-head"><div><h2>Quien puede acceder?</h2><p>El enlace ya lleva token privado. Activa solo lo que necesites.</p></div></div>
+      <div class="section-head"><div><h2>¿Quién puede acceder?</h2><p>El enlace ya lleva un token privado. Activa solo lo que necesites.</p></div></div>
       <div class="two-col">
         <div class="option-box">
-          <h3>Contrasena global</h3>
-          <p>Se pedira al abrir la pagina publica. No se guarda en configuracion.</p>
-          <input id="global-password" type="password" placeholder="Nueva contrasena global">
+          <h3>Contraseña global</h3>
+          <p>Se pedirá al abrir la página pública. No se guarda en la configuración.</p>
+          <input id="global-password" type="password" placeholder="Nueva contraseña global">
           <div class="button-row"><button data-action="set-global">Aplicar</button><button data-action="clear-global" class="secondary">Quitar</button></div>
         </div>
         <div class="option-box">
@@ -3882,14 +4465,14 @@ ADMIN_HTML = r"""
       <details class="advanced">
         <summary>Seguridad avanzada</summary>
         <div class="three-col">
-          <label>Clave para seleccion <input id="selection-password" type="password"></label>
+          <label>Clave para la selección <input id="selection-password" type="password"></label>
           <button data-action="set-file-password">Clave archivo</button>
           <button data-action="set-folder-password">Clave carpeta</button>
           <button data-action="clear-file-password" class="secondary">Quitar clave archivo</button>
           <button data-action="clear-folder-password" class="secondary">Quitar clave carpeta</button>
           <label>Expirar enlace en minutos <input id="expiration-minutes" type="number" min="0" placeholder="0 = nunca"></label>
-          <label>Limite por archivo <input id="download-limit" type="number" min="0" placeholder="0 = sin limite"></label>
-          <label class="inline-check"><input id="uploads-require-global" type="checkbox"> Subidas requieren contrasena global</label>
+          <label>Límite por archivo <input id="download-limit" type="number" min="0" placeholder="0 = sin límite"></label>
+          <label class="inline-check"><input id="uploads-require-global" type="checkbox"> Las subidas requieren contraseña global</label>
           <button data-action="save-security">Guardar reglas</button>
           <label>IP <input id="ip-input" placeholder="1.2.3.4"></label>
           <button data-action="block-ip">Bloquear IP</button>
@@ -3900,30 +4483,30 @@ ADMIN_HTML = r"""
     </section>
 
     <section class="card wizard-panel" id="step-publish" data-section="step-publish">
-      <div class="section-head"><div><h2>Como lo publicamos?</h2><p>Automatico intenta Tailscale, despues Cloudflare y finalmente una URL LAN/local.</p></div></div>
+      <div class="section-head"><div><h2>¿Cómo lo publicamos?</h2><p>El modo automático intenta Tailscale, después Cloudflare y finalmente una URL LAN/local.</p></div></div>
       <div class="publish-choice">
-        <label><input type="radio" name="mode-choice" value="auto" checked><span>Automatico recomendado</span><small>Tailscale -> Cloudflare -> puerto propio</small></label>
-        <label><input type="radio" name="mode-choice" value="cloudflare"><span>Cloudflare rapido</span><small>Quick Tunnel temporal</small></label>
+        <label><input type="radio" name="mode-choice" value="auto" checked><span>Automático recomendado</span><small>Tailscale -> Cloudflare -> puerto propio</small></label>
+        <label><input type="radio" name="mode-choice" value="cloudflare"><span>Cloudflare rápido</span><small>Quick Tunnel temporal</small></label>
         <label><input type="radio" name="mode-choice" value="direct"><span>Puerto propio</span><small>Usa LAN/router/firewall del host</small></label>
       </div>
       <details class="advanced">
-        <summary>Publicacion avanzada</summary>
+        <summary>Publicación avanzada</summary>
         <div class="three-col">
-          <label>Modo manual <select id="mode"><option value="auto">Automatico</option><option value="tailscale">Tailscale Funnel</option><option value="cloudflare">Cloudflare Quick Tunnel</option><option value="direct">Puerto propio</option></select></label>
+          <label>Modo manual <select id="mode"><option value="auto">Automático</option><option value="tailscale">Tailscale Funnel</option><option value="cloudflare">Cloudflare Quick Tunnel</option><option value="direct">Puerto propio</option></select></label>
           <label>Puerto local <input id="port" value="80"></label>
-          <label>Puerto publico Tailscale <select id="tailscale-port"><option>443</option><option>8443</option><option>10000</option></select></label>
+          <label>Puerto público Tailscale <select id="tailscale-port"><option>443</option><option>8443</option><option>10000</option></select></label>
           <label class="inline-check"><input id="manual-port" type="checkbox"> Usar exactamente este puerto</label>
         </div>
       </details>
-      <label class="save-box"><input id="save-preferences" type="checkbox"> Guardar esta configuracion y no preguntarme la proxima vez</label>
-      <div class="button-row"><button data-action="start" class="primary big">Publicar ahora</button><button data-action="delete-preferences" class="secondary">Borrar configuracion guardada</button></div>
+      <label class="save-box"><input id="save-preferences" type="checkbox"> Guardar esta configuración y no preguntarme la próxima vez</label>
+      <div class="button-row"><button data-action="start" class="primary big">Publicar ahora</button><button data-action="delete-preferences" class="secondary">Borrar configuración guardada</button></div>
       <p id="preferences-message" class="muted"></p>
     </section>
 
     <section class="card wizard-panel" id="step-ready" data-section="step-ready">
       <div class="section-head"><div><h2>Enlace listo</h2><p>Copia esta URL para compartir los archivos. El panel admin sigue siendo solo local.</p></div></div>
       <div class="url-card">
-        <input id="share-url" readonly placeholder="La URL aparecera aqui al publicar">
+        <input id="share-url" readonly placeholder="La URL aparecerá aquí al publicar">
         <button id="copy-url" type="button">Copiar URL</button>
         <button id="open-client" type="button" class="secondary">Previsualizar</button>
       </div>
@@ -3940,7 +4523,7 @@ ADMIN_HTML = r"""
 
   <section id="client-preview" class="preview" hidden>
     <div class="preview-card">
-      <div class="section-head"><div><h2>Previsualizacion cliente</h2><p>Vista integrada de la pagina publica.</p></div><button id="close-preview" class="secondary">Cerrar</button></div>
+      <div class="section-head"><div><h2>Previsualización del cliente</h2><p>Vista integrada de la página pública.</p></div><button id="close-preview" class="secondary">Cerrar</button></div>
       <iframe id="preview-frame" title="Vista cliente"></iframe>
     </div>
   </section>
@@ -3953,8 +4536,9 @@ ADMIN_HTML = r"""
 """
 
 ADMIN_CSS = r"""
-:root{--bg:#f3f5f8;--surface:#fff;--surface-alt:#f9fbfe;--ink:#1b1f24;--muted:#5d6778;--line:#d7dde7;--line-strong:#c7ceda;--accent:#0b57d0;--accent-hover:#0847ab;--accent-soft:#e8f0fe;--warn:#fff6d9;--danger:#fde7e9;--danger-ink:#8a2f36;--shadow:0 10px 24px rgba(20,31,53,.08)}
+:root{--bg:#f3f7f7;--surface:#fff;--surface-alt:#f7faf9;--ink:#17212b;--muted:#60706e;--line:#dce7e5;--line-strong:#b9c9c6;--accent:#0f8a7a;--accent-hover:#08685d;--accent-soft:#dff3ee;--warn:#fff6d9;--danger:#ffe8e4;--danger-ink:#842d23;--shadow:0 12px 30px rgba(31,48,62,.08)}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;letter-spacing:0}button,input,select{font:inherit;letter-spacing:0}button{border:1px solid transparent;border-radius:4px;background:var(--accent);color:#fff;padding:10px 14px;font-weight:700;cursor:pointer;min-height:40px}button:hover{background:var(--accent-hover)}button.secondary{background:#fff;color:var(--ink);border-color:var(--line-strong)}button.secondary:hover{background:var(--surface-alt)}button.big{font-size:1.02rem;padding:12px 18px}input,select{width:100%;border:1px solid var(--line-strong);border-radius:4px;padding:10px 12px;background:#fff;color:var(--ink)}label{display:grid;gap:7px;color:var(--muted);font-size:.92rem}.shell{width:min(1220px,calc(100% - 28px));margin:0 auto;padding:20px 0 32px}.top,.card,.status-strip,.steps{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}.top{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:18px;margin-bottom:12px}.top h1{margin:0;font-size:1.82rem;line-height:1.15}.top p{margin:6px 0 0;color:var(--muted)}.eyebrow{margin:0 0 6px;color:var(--accent);font-weight:760}.top-actions,.button-row,.url-card{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.status-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin-bottom:12px;overflow:hidden}.status-strip div{padding:12px 14px;border-right:1px solid var(--line)}.status-strip div:last-child{border-right:0}.status-strip span{display:block;color:var(--muted);font-size:.82rem}.status-strip strong{display:block;margin-top:4px}.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-bottom:14px;overflow:hidden}.step{background:#fff;color:var(--ink);border-radius:0;border-right:1px solid var(--line);justify-content:flex-start;display:flex;gap:10px;align-items:center;box-shadow:none}.step:last-child{border-right:0}.step b{width:28px;height:28px;border-radius:999px;background:var(--surface-alt);display:grid;place-items:center}.step.active{background:var(--accent-soft);color:var(--accent)}.step.active b{background:var(--accent);color:#fff}.wizard-panel{display:none;padding:18px;margin-bottom:14px}.wizard-panel.active{display:block}.section-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.section-head h2{margin:0;font-size:1.4rem}.section-head h3,.option-box h3{margin:0 0 8px}.section-head p,.option-box p,.muted{color:var(--muted);margin:6px 0 0}.two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.three-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end}.option-box{border:1px solid var(--line);border-radius:8px;background:var(--surface-alt);padding:14px;display:grid;gap:10px}.inline-check,.save-box{display:flex;align-items:center;gap:9px;color:var(--ink);font-weight:620}.inline-check input,.save-box input{width:auto}.save-box{margin:14px 0;padding:12px;background:var(--warn);border:1px solid #e9d58f;border-radius:8px}.search{margin:12px 0}.item-list{display:grid;gap:8px}.item-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;background:#fff;padding:11px}.item-row.selected{border-color:var(--accent);background:var(--accent-soft)}.item-row strong{display:block;overflow-wrap:anywhere}.item-row small{display:block;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.row-actions{display:flex;gap:6px;flex-wrap:wrap}.row-actions button{min-height:34px;padding:7px 10px;font-size:.9rem}.compact{max-height:310px;overflow:auto}.publish-choice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.publish-choice label{border:1px solid var(--line);background:#fff;border-radius:8px;padding:14px;cursor:pointer;color:var(--ink)}.publish-choice input{width:auto;margin-right:8px}.publish-choice span{font-weight:760}.publish-choice small{display:block;color:var(--muted);margin-top:6px}.advanced{margin-top:16px;border:1px solid var(--line);border-radius:8px;background:var(--surface-alt);padding:12px}.advanced summary{cursor:pointer;font-weight:760}.advanced>div,.advanced pre{margin-top:12px}.url-card{background:var(--accent-soft);border:1px solid #cfdcff;border-radius:8px;padding:14px}.url-card input{flex:1;min-width:280px;font-weight:700}pre{margin:0;min-height:220px;max-height:360px;overflow:auto;background:#111827;color:#e6ecfa;padding:12px;border-radius:8px;white-space:pre-wrap}.text-link{color:var(--accent);font-weight:700}.pill{border-radius:999px;padding:2px 8px;background:var(--surface-alt);font-size:.82rem}.pill.danger{background:var(--danger);color:var(--danger-ink)}.preview{position:fixed;inset:0;z-index:20;background:rgba(20,24,33,.48);padding:24px}.preview-card{height:100%;display:grid;grid-template-rows:auto 1fr;background:#fff;border-radius:8px;padding:14px}.preview iframe{width:100%;height:100%;border:1px solid var(--line);border-radius:8px}.toast{position:fixed;right:22px;bottom:22px;z-index:30;background:#1e2430;color:#fff;border-radius:8px;padding:12px 14px;box-shadow:0 14px 34px rgba(13,18,28,.3)}.context-menu{position:fixed;z-index:25;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 16px 34px rgba(20,31,53,.17);min-width:210px;padding:6px}.context-menu button{width:100%;justify-content:flex-start;background:transparent;color:var(--ink);border:0;font-weight:600}.context-menu button:hover{background:var(--surface-alt)}@media(max-width:900px){.top,.section-head{flex-direction:column}.status-strip,.steps,.two-col,.three-col,.publish-choice{grid-template-columns:1fr}.status-strip div,.step{border-right:0;border-bottom:1px solid var(--line)}}@media(max-width:620px){.shell{width:min(100% - 18px,1220px);padding-top:12px}.top h1{font-size:1.38rem}.top-actions,.button-row,.url-card{display:grid}.item-row{grid-template-columns:1fr}}
+button,input,select{border-radius:8px}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid rgba(15,138,122,.2);outline-offset:2px}.top,.card,.status-strip,.steps,.option-box,.advanced,.item-row,.preview-card,.preview iframe{border-radius:12px}.url-card{border-color:#a9dfcc;border-radius:10px}
 """
 
 ADMIN_JS = r"""
@@ -3970,20 +4554,58 @@ function showStep(id){currentStep=id;document.querySelectorAll("[data-section]")
 function selectedFileIds(){return Array.from(selectedFiles)}
 function selectedFolderIds(){return Array.from(selectedFolders)}
 async function refresh(){state=await api("/state",{method:"GET"});render()}
-function render(){if(!state)return;$("status").textContent=state.status;$("file-count").textContent=state.file_count;$("total-size").textContent=state.total_size_text;$("upload-state").textContent=state.upload_enabled?"Si":"No";$("active-count").textContent=state.active.length;$("recommendation").textContent=state.recommendation||"";$("share-url").value=state.share_url||"";$("logs").textContent=state.logs.join("\n");$("export-history").href=`${apiBase}/history/export`;$("expiration-minutes").placeholder=state.security.expires_at_text?`Expira: ${state.security.expires_at_text}`:"0 = nunca";$("security-summary").textContent=`IPs bloqueadas: ${(state.security.blocked_ips||[]).join(", ")||"ninguna"}`;if(!initialPreferencesApplied){$("upload-enabled").checked=!!state.upload_enabled;$("upload-dir").value=state.upload_dir||"";$("save-preferences").checked=!!state.preferences_saved;$("download-limit").value=state.security.download_limit_per_file||"";$("uploads-require-global").checked=!!state.security.uploads_require_global;applyPreferencesToInputs();initialPreferencesApplied=true}renderFiles();renderFolders();renderActive();renderHistory();if(state.wizard_step===4)showStep("step-ready");}
+function render(){if(!state)return;$("status").textContent=state.status;$("file-count").textContent=state.file_count;$("total-size").textContent=state.total_size_text;$("upload-state").textContent=state.upload_enabled?"Sí":"No";$("active-count").textContent=state.active.length;$("recommendation").textContent=state.recommendation||"";$("share-url").value=state.share_url||"";$("logs").textContent=state.logs.join("\n");$("export-history").href=`${apiBase}/history/export`;$("expiration-minutes").placeholder=state.security.expires_at_text?`Expira: ${state.security.expires_at_text}`:"0 = nunca";$("security-summary").textContent=`IPs bloqueadas: ${(state.security.blocked_ips||[]).join(", ")||"ninguna"}`;if(!initialPreferencesApplied){$("upload-enabled").checked=!!state.upload_enabled;$("upload-dir").value=state.upload_dir||"";$("save-preferences").checked=!!state.preferences_saved;$("download-limit").value=state.security.download_limit_per_file||"";$("uploads-require-global").checked=!!state.security.uploads_require_global;applyPreferencesToInputs();initialPreferencesApplied=true}renderFiles();renderFolders();renderActive();renderHistory();if(state.wizard_step===4)showStep("step-ready");}
 function applyPreferencesToInputs(){const p=state.preferences||{};$("mode").value=p.mode||"auto";$("port").value=p.port||"80";$("manual-port").checked=!!p.manual_port;$("tailscale-port").value=p.tailscale_public_port||"443";$("include-subfolders").checked=!!p.include_subfolders;document.querySelectorAll("input[name='mode-choice']").forEach(r=>r.checked=r.value===($("mode").value||"auto"))}
-function renderFiles(){const list=$("files-list"),q=$("file-search").value.trim().toLowerCase();list.innerHTML="";const files=(state.files||[]).filter(f=>!q||f.display_name.toLowerCase().includes(q));if(!files.length){list.innerHTML="<div class='item-row'><div><strong>No hay archivos todavia</strong><small>Anade archivos o una carpeta para empezar.</small></div></div>";return}for(const f of files){const row=document.createElement("div");row.className=`item-row ${selectedFiles.has(f.id)?"selected":""}`;row.innerHTML=`<div><strong>${escapeHtml(f.display_name)}</strong><small>${f.size_text} - ${escapeHtml(f.source)} ${f.protected?"- protegido":""}</small><small>${escapeHtml(f.path)}</small></div><div class="row-actions"><button data-file-action="select" data-id="${f.id}" class="secondary">${selectedFiles.has(f.id)?"Seleccionado":"Seleccionar"}</button><button data-file-action="copy" data-id="${f.id}" class="secondary">Copiar enlace</button><button data-file-action="open" data-id="${f.id}" class="secondary">Ubicacion</button><button data-file-action="remove" data-id="${f.id}" class="secondary">Quitar</button></div>`;row.addEventListener("contextmenu",e=>showContext(e,"file",f.id));list.appendChild(row)}}
+function renderFiles(){const list=$("files-list"),q=$("file-search").value.trim().toLowerCase();list.innerHTML="";const files=(state.files||[]).filter(f=>!q||f.display_name.toLowerCase().includes(q));if(!files.length){list.innerHTML="<div class='item-row'><div><strong>No hay archivos todavía</strong><small>Añade archivos o una carpeta para empezar.</small></div></div>";return}for(const f of files){const row=document.createElement("div");row.className=`item-row ${selectedFiles.has(f.id)?"selected":""}`;row.innerHTML=`<div><strong>${escapeHtml(f.display_name)}</strong><small>${f.size_text} - ${escapeHtml(f.source)} ${f.protected?"- protegido":""}</small><small>${escapeHtml(f.path)}</small></div><div class="row-actions"><button data-file-action="select" data-id="${f.id}" class="secondary">${selectedFiles.has(f.id)?"Seleccionado":"Seleccionar"}</button><button data-file-action="copy" data-id="${f.id}" class="secondary">Copiar enlace</button><button data-file-action="open" data-id="${f.id}" class="secondary">Ubicación</button><button data-file-action="remove" data-id="${f.id}" class="secondary">Quitar</button></div>`;row.addEventListener("contextmenu",e=>showContext(e,"file",f.id));list.appendChild(row)}}
 function renderFolders(){const list=$("folders-list");list.innerHTML="";for(const f of state.folders||[]){const row=document.createElement("div");row.className=`item-row ${selectedFolders.has(f.id)?"selected":""}`;row.innerHTML=`<div><strong>${escapeHtml(f.name)}</strong><small>${f.file_count} archivos - ${f.total_size_text}${f.protected?" - protegida":""}</small><small>${escapeHtml(f.path)}</small></div><div class="row-actions"><button data-folder-action="select" data-id="${f.id}" class="secondary">${selectedFolders.has(f.id)?"Seleccionada":"Seleccionar"}</button><button data-folder-action="refresh" data-id="${f.id}" class="secondary">Actualizar</button><button data-folder-action="remove" data-id="${f.id}" class="secondary">Quitar</button></div>`;row.addEventListener("contextmenu",e=>showContext(e,"folder",f.id));list.appendChild(row)}}
 function renderActive(){const list=$("active-list");list.innerHTML="";for(const a of state.active||[]){const row=document.createElement("div");row.className="item-row";row.innerHTML=`<div><strong>${escapeHtml(a.file_name)}</strong><small>${escapeHtml(a.ip)} - ${a.percent.toFixed(0)}% - ${formatBytes(a.speed)}/s</small></div><div class="row-actions"><button data-transfer-action="cancel" data-id="${a.id}" class="secondary">Anular</button></div>`;list.appendChild(row)}if(!state.active.length)list.innerHTML="<p class='muted'>No hay descargas activas.</p>"}
 function renderHistory(){const list=$("history-list");list.innerHTML="";for(const row of (state.history||[]).slice(0,40)){const div=document.createElement("div");div.className="item-row";div.innerHTML=`<div><strong>${escapeHtml(row.file_name||"-")}</strong><small>${row.updated_at} - ${row.event_type} - ${row.ip} - ${row.status}</small></div>`;list.appendChild(div)}}
 function currentPreferences(){const mode=$("mode").value||document.querySelector("input[name='mode-choice']:checked")?.value||"auto";return{save_preferences:$("save-preferences").checked,mode,port:$("port").value,manual_port:$("manual-port").checked,tailscale_public_port:$("tailscale-port").value,upload_enabled:$("upload-enabled").checked,upload_dir:$("upload-dir").value,include_subfolders:$("include-subfolders").checked,file_paths:(state.files||[]).map(f=>f.path),folders:(state.folders||[]).map(f=>({path:f.path,include_subfolders:f.include_subfolders})),expiration_minutes:$("expiration-minutes").value,download_limit_per_file:$("download-limit").value,uploads_require_global:$("uploads-require-global").checked}}
-async function savePreferenceChoice(prefs=currentPreferences()){if(prefs.save_preferences){await api("/preferences",{method:"POST",body:JSON.stringify(prefs)});$("preferences-message").textContent="Configuracion guardada."}else{await api("/preferences",{method:"DELETE"});$("preferences-message").textContent="La app preguntara cada vez."}}
-async function copyText(value){if(!value){notify("No hay URL todavia.");return}try{await navigator.clipboard.writeText(value);notify("Copiado al portapapeles.")}catch{$("share-url").select();document.execCommand("copy");notify("Copiado al portapapeles.")}}
-async function action(name){try{if(name==="pick-files"){await api("/files/pick",{method:"POST",body:"{}"});showStep("step-files")}if(name==="pick-folder"){await api("/folders/pick",{method:"POST",body:JSON.stringify({include_subfolders:$("include-subfolders").checked})});showStep("step-files")}if(name==="save-uploads")await api("/uploads",{method:"POST",body:JSON.stringify({enabled:$("upload-enabled").checked,upload_dir:$("upload-dir").value})});if(name==="start"){if(!state?.has_files){showStep("step-files");notify("Anade algun archivo antes de publicar.");return}const prefs=currentPreferences();await api("/uploads",{method:"POST",body:JSON.stringify({enabled:prefs.upload_enabled,upload_dir:prefs.upload_dir})});await api("/security/options",{method:"POST",body:JSON.stringify(prefs)});await savePreferenceChoice(prefs);await api("/publish/start",{method:"POST",body:JSON.stringify(prefs)});showStep("step-ready")}if(name==="stop")await api("/publish/stop",{method:"POST",body:"{}"});if(name==="set-global")await setGlobalPassword($("global-password").value);if(name==="clear-global")await setGlobalPassword("");if(name==="set-file-password")await api("/files/password",{method:"POST",body:JSON.stringify({ids:selectedFileIds(),password:$("selection-password").value})});if(name==="clear-file-password")await api("/files/password",{method:"POST",body:JSON.stringify({ids:selectedFileIds(),password:""})});if(name==="set-folder-password")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:selectedFolderIds(),password:$("selection-password").value})});if(name==="clear-folder-password")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:selectedFolderIds(),password:""})});if(name==="save-security")await api("/security/options",{method:"POST",body:JSON.stringify(currentPreferences())});if(name==="block-ip")await api("/ips/block",{method:"POST",body:JSON.stringify({ip:$("ip-input").value})});if(name==="unblock-ip")await api("/ips/unblock",{method:"POST",body:JSON.stringify({ip:$("ip-input").value})});if(name==="delete-preferences"){await api("/preferences",{method:"DELETE"});$("save-preferences").checked=false;$("preferences-message").textContent="Configuracion borrada."}$("selection-password").value="";$("global-password").value="";await refresh();notify("Listo.")}catch(e){notify(e.message)}}
+async function savePreferenceChoice(prefs=currentPreferences()){if(prefs.save_preferences){await api("/preferences",{method:"POST",body:JSON.stringify(prefs)});$("preferences-message").textContent="Configuración guardada."}else{await api("/preferences",{method:"DELETE"});$("preferences-message").textContent="La app preguntará cada vez."}}
+async function copyText(value){if(!value){notify("No hay URL todavía.");return}try{await navigator.clipboard.writeText(value);notify("Copiado al portapapeles.")}catch{$("share-url").select();document.execCommand("copy");notify("Copiado al portapapeles.")}}
+async function action(name){
+  try{
+    if(name==="pick-files"){
+      await api("/files/pick",{method:"POST",body:"{}"});showStep("step-files")
+    }
+    if(name==="pick-folder"){
+      await api("/folders/pick",{method:"POST",body:JSON.stringify({include_subfolders:$("include-subfolders").checked})});showStep("step-files")
+    }
+    if(name==="save-uploads")await api("/uploads",{method:"POST",body:JSON.stringify({enabled:$("upload-enabled").checked,upload_dir:$("upload-dir").value})});
+    if(name==="start"){
+      if(!state?.has_files){showStep("step-files");notify("Añade algún archivo antes de publicar.");return}
+      const prefs=currentPreferences();
+      await api("/uploads",{method:"POST",body:JSON.stringify({enabled:prefs.upload_enabled,upload_dir:prefs.upload_dir})});
+      await api("/security/options",{method:"POST",body:JSON.stringify(prefs)});
+      await savePreferenceChoice(prefs);
+      await api("/publish/start",{method:"POST",body:JSON.stringify(prefs)});
+      showStep("step-ready")
+    }
+    if(name==="stop")await api("/publish/stop",{method:"POST",body:"{}"});
+    if(name==="set-global")await setGlobalPassword($("global-password").value);
+    if(name==="clear-global")await setGlobalPassword("");
+    if(name==="set-file-password")await api("/files/password",{method:"POST",body:JSON.stringify({ids:selectedFileIds(),password:$("selection-password").value})});
+    if(name==="clear-file-password")await api("/files/password",{method:"POST",body:JSON.stringify({ids:selectedFileIds(),password:""})});
+    if(name==="set-folder-password")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:selectedFolderIds(),password:$("selection-password").value})});
+    if(name==="clear-folder-password")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:selectedFolderIds(),password:""})});
+    if(name==="save-security")await api("/security/options",{method:"POST",body:JSON.stringify(currentPreferences())});
+    if(name==="block-ip")await api("/ips/block",{method:"POST",body:JSON.stringify({ip:$("ip-input").value})});
+    if(name==="unblock-ip")await api("/ips/unblock",{method:"POST",body:JSON.stringify({ip:$("ip-input").value})});
+    if(name==="delete-preferences"){
+      await api("/preferences",{method:"DELETE"});
+      $("save-preferences").checked=false;
+      $("preferences-message").textContent="Configuración borrada."
+    }
+    $("selection-password").value="";
+    $("global-password").value="";
+    await refresh();
+    notify("Listo.")
+  }catch(e){notify(e.message)}
+}
 async function setGlobalPassword(password){await api("/global-password",{method:"POST",body:JSON.stringify({password})})}
 async function fileAction(kind,id){if(kind==="select"){selectedFiles.has(id)?selectedFiles.delete(id):selectedFiles.add(id);renderFiles();return}if(kind==="copy")await copyText(`${state.share_url}/download/${id}`);if(kind==="open")await api("/files/open-location",{method:"POST",body:JSON.stringify({id})});if(kind==="remove")await api("/files/remove",{method:"POST",body:JSON.stringify({ids:[id]})});await refresh()}
 async function folderAction(kind,id){if(kind==="select"){selectedFolders.has(id)?selectedFolders.delete(id):selectedFolders.add(id);renderFolders();return}if(kind==="refresh")await api("/folders/refresh",{method:"POST",body:JSON.stringify({id})});if(kind==="remove")await api("/folders/remove",{method:"POST",body:JSON.stringify({id,remove_files:true})});await refresh()}
-function showContext(e,type,id){e.preventDefault();contextTarget={type,id};const m=$("context-menu"),items=[];if(type==="file")items.push(["Copiar enlace","copy-file"],["Abrir ubicacion","open-location"],["Quitar","remove-file"],["Aplicar clave","file-pass"],["Quitar clave","file-clear"]);if(type==="folder")items.push(["Refrescar","refresh-folder"],["Quitar carpeta","remove-folder"],["Aplicar clave","folder-pass"],["Quitar clave","folder-clear"]);m.innerHTML=items.map(([l,a])=>`<button data-context="${a}">${l}</button>`).join("");m.style.left=`${e.clientX}px`;m.style.top=`${e.clientY}px`;m.hidden=false}
+function showContext(e,type,id){e.preventDefault();contextTarget={type,id};const m=$("context-menu"),items=[];if(type==="file")items.push(["Copiar enlace","copy-file"],["Abrir ubicación","open-location"],["Quitar","remove-file"],["Aplicar clave","file-pass"],["Quitar clave","file-clear"]);if(type==="folder")items.push(["Refrescar","refresh-folder"],["Quitar carpeta","remove-folder"],["Aplicar clave","folder-pass"],["Quitar clave","folder-clear"]);m.innerHTML=items.map(([l,a])=>`<button data-context="${a}">${l}</button>`).join("");m.style.left=`${e.clientX}px`;m.style.top=`${e.clientY}px`;m.hidden=false}
 async function handleContext(a){const t=contextTarget;$("context-menu").hidden=true;if(!t)return;if(t.type==="file")selectedFiles=new Set([t.id]);if(t.type==="folder")selectedFolders=new Set([t.id]);const p=$("selection-password").value;if(a==="copy-file")await copyText(`${state.share_url}/download/${t.id}`);if(a==="open-location")await api("/files/open-location",{method:"POST",body:JSON.stringify({id:t.id})});if(a==="remove-file")await api("/files/remove",{method:"POST",body:JSON.stringify({ids:[t.id]})});if(a==="file-pass")await api("/files/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:p})});if(a==="file-clear")await api("/files/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:""})});if(a==="refresh-folder")await api("/folders/refresh",{method:"POST",body:JSON.stringify({id:t.id})});if(a==="remove-folder")await api("/folders/remove",{method:"POST",body:JSON.stringify({id:t.id,remove_files:true})});if(a==="folder-pass")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:p})});if(a==="folder-clear")await api("/folders/password",{method:"POST",body:JSON.stringify({ids:[t.id],password:""})});await refresh()}
 function previewClient(){if(!state?.share_url){notify("Publica primero para previsualizar.");return}$("preview-frame").src=state.share_url;$("client-preview").hidden=false}
 document.addEventListener("click",e=>{const nav=e.target.closest("[data-nav]");if(nav)showStep(nav.dataset.nav);const actionButton=e.target.closest("[data-action]");if(actionButton)action(actionButton.dataset.action);const fileButton=e.target.closest("[data-file-action]");if(fileButton)fileAction(fileButton.dataset.fileAction,fileButton.dataset.id);const folderButton=e.target.closest("[data-folder-action]");if(folderButton)folderAction(folderButton.dataset.folderAction,folderButton.dataset.id);const transferButton=e.target.closest("[data-transfer-action]");if(transferButton)api("/transfers/cancel",{method:"POST",body:JSON.stringify({id:transferButton.dataset.id})}).then(refresh);const context=e.target.closest("[data-context]");if(context)handleContext(context.dataset.context);if(!e.target.closest(".context-menu"))$("context-menu").hidden=true});
@@ -4001,5 +4623,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

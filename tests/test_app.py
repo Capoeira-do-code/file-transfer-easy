@@ -1,5 +1,7 @@
 import io
 import json
+import os
+import tarfile
 import tempfile
 import unittest
 import urllib.request
@@ -327,11 +329,11 @@ class FileTransferEasyTests(unittest.TestCase):
 
     def test_admin_wizard_ui_smoke(self) -> None:
         self.assertIn("Comparte archivos en 4 pasos", app.ADMIN_HTML)
-        self.assertIn("Guardar esta configuracion y no preguntarme la proxima vez", app.ADMIN_HTML)
-        self.assertIn("Que compartir", app.ADMIN_HTML)
-        self.assertIn("Automatico recomendado", app.ADMIN_HTML)
+        self.assertIn("Guardar esta configuración y no preguntarme la próxima vez", app.ADMIN_HTML)
+        self.assertIn("Qué compartir", app.ADMIN_HTML)
+        self.assertIn("Automático recomendado", app.ADMIN_HTML)
         self.assertIn("Seguridad avanzada", app.ADMIN_HTML)
-        self.assertIn("Publicacion avanzada", app.ADMIN_HTML)
+        self.assertIn("Publicación avanzada", app.ADMIN_HTML)
 
     def test_admin_and_public_routes_are_separated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -378,6 +380,13 @@ class FileTransferEasyTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("javascript", response.headers["Content-Type"])
             response.close()
+
+    def test_public_ui_assets_include_accessible_real_progress_states(self) -> None:
+        self.assertIn('aria-live="polite"', app.CLIENT_HTML)
+        self.assertIn("extension_label", app.CLIENT_HTML)
+        self.assertIn("XMLHttpRequest", app.CLIENT_JS)
+        self.assertIn('data-status="success"', app.CLIENT_CSS)
+        self.assertIn("prefers-reduced-motion", app.CLIENT_CSS)
 
     def test_preferences_are_saved_without_secrets_and_can_be_deleted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -596,6 +605,19 @@ class FileTransferEasyTests(unittest.TestCase):
             self.assertEqual(Path(path), bin_dir / "cloudflared.exe")
             self.assertTrue(Path(path).exists())
 
+    def test_cloudflared_archive_extraction_replaces_archive_safely(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "cloudflared.exe"
+            payload = b"cloudflared-binary"
+            with tarfile.open(target, "w:gz") as archive:
+                member = tarfile.TarInfo("release/cloudflared")
+                member.size = len(payload)
+                archive.addfile(member, io.BytesIO(payload))
+
+            app.extract_cloudflared_archive(target, target)
+
+            self.assertEqual(target.read_bytes(), payload)
+
     def test_python_dependency_installer_uses_requirements(self) -> None:
         completed = subprocess_result = mock.Mock()
         subprocess_result.returncode = 0
@@ -660,6 +682,33 @@ class FileTransferEasyTests(unittest.TestCase):
         self.assertIn("PySide6", requirements)
         self.assertIn("--hidden-import PySide6.QtWebEngineWidgets", build_script)
         self.assertNotIn("window.open", app.ADMIN_JS)
+
+    def test_macos_qt_plugin_compatibility_path_is_prepared(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            compatibility = root / "compatibility"
+            source.mkdir()
+            (source / "libqcocoa.dylib").write_bytes(b"cocoa")
+            (source / "libqoffscreen.dylib").write_bytes(b"offscreen")
+
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+                prepared = app.prepare_macos_qt_platform_plugins(
+                    source_dir=source,
+                    compatibility_dir=compatibility,
+                    platform_name="darwin",
+                )
+
+                self.assertEqual(prepared, compatibility)
+                self.assertEqual((compatibility / "libqcocoa.so").read_bytes(), b"cocoa")
+                self.assertEqual(
+                    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"],
+                    str(compatibility),
+                )
+
+    def test_qt_plugin_compatibility_is_macos_only(self) -> None:
+        self.assertIsNone(app.prepare_macos_qt_platform_plugins(platform_name="win32"))
 
     def test_only_one_active_embedded_constant_per_asset(self) -> None:
         source = Path("app.py").read_text(encoding="utf-8")
