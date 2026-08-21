@@ -1,0 +1,129 @@
+name: Build desktop app
+
+# Push a tag to cut a release:
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# Running the workflow by hand just produces downloadable artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths: ["go-app/**", ".github/workflows/build.yml"]
+
+defaults:
+  run:
+    working-directory: go-app
+
+jobs:
+  test:
+    name: Pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-app/go.mod
+          cache-dependency-path: go-app/go.sum
+
+      # The GUI needs GTK/WebKit headers on Linux; the tests do not touch the
+      # desktop layer, so only the pure packages are exercised here.
+      - name: go vet
+        run: go vet ./internal/...
+
+      - name: Pruebas con detector de carreras
+        run: go test -race ./internal/...
+
+  macos:
+    name: macOS (.dmg)
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-app/go.mod
+          cache-dependency-path: go-app/go.sum
+
+      - name: Determinar la versión
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Construir el paquete y el .dmg
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          chmod +x scripts/build-macos.sh
+          ./scripts/build-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: go-app/dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows (.exe)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-app/go.mod
+          cache-dependency-path: go-app/go.sum
+
+      - name: Determinar la versión
+        id: version
+        shell: bash
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Instalar NSIS
+        run: choco install nsis --no-progress -y
+
+      - name: Construir el .exe y el instalador
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          # choco puts makensis here but does not add it to PATH for this step.
+          $env:PATH = "$env:PATH;C:\Program Files (x86)\NSIS"
+          .\scripts\build-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: |
+            go-app/dist/FileTransferEasy.exe
+            go-app/dist/FileTransferEasy-Setup-*.exe
+          if-no-files-found: error
+
+  release:
+    name: Publicar la release
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            ## Instalación
+
+            **macOS** — abre el `.dmg` y arrastra la app a Aplicaciones. La
+            primera vez ábrela con clic derecho › Abrir, porque el paquete no
+            está firmado con un Developer ID de Apple.
+
+            **Windows** — usa el instalador, o el `.exe` portable si prefieres
+            no instalar nada. Necesita el runtime de WebView2, que ya viene con
+            Windows 11 y con Windows 10 actualizado.
+
+            La primera vez que compartas algo, la app descarga `cloudflared`
+            automáticamente.

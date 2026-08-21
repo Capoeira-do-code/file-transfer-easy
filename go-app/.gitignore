@@ -1,0 +1,5 @@
+# Build output
+/dist/
+
+# Written by go-winres immediately before a Windows build, then removed
+rsrc_windows_*.syso

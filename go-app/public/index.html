@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Archivos compartidos contigo con File Transfer Easy.">
+<title>Archivos compartidos · File Transfer Easy</title>
+<script>window.__FTE_BASE__="__FTE_BASE__";</script>
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/app.js" defer></script>
+</head>
+<body>
+
+<a class="skip-link" href="#stage">Saltar al contenido</a>
+
+<div class="page">
+
+  <header class="head">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+          <rect x="3.2" y="3.2" width="17.6" height="17.6" rx="5.4"/>
+          <path d="M12 16.6V7.6"/>
+          <path d="m8.5 11.1 3.5-3.5 3.5 3.5"/>
+        </svg>
+      </span>
+      <span class="brand-name">File Transfer Easy</span>
+    </div>
+
+    <div class="head-body" id="headBody">
+      <h1 class="title">Archivos compartidos contigo</h1>
+      <p class="summary" id="summary">Cargando los archivos…</p>
+
+      <p class="hint" id="hint" role="status" hidden>
+        <span class="hint-dot" aria-hidden="true"></span>
+        <span>Sin conexión con el remitente. Reintentando…</span>
+      </p>
+
+      <div class="cta" id="cta" hidden>
+        <a class="btn btn-primary" id="zipLink" href="#" download>
+          <span class="ic ic-20" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+              <path d="M3.9 7.7h16.2v10.6a2.1 2.1 0 0 1-2.1 2.1H6a2.1 2.1 0 0 1-2.1-2.1z"/>
+              <path d="M2.9 4.1h18.2v3.6H2.9z"/>
+              <path d="M10.3 11.6h3.4"/>
+              <path d="M10.3 15.1h3.4"/>
+            </svg>
+          </span>
+          <span>Descargar todo (ZIP)</span>
+        </a>
+        <p class="note">Las descargas grandes pueden tardar un rato. Mantén esta pestaña abierta mientras se completan.</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage" id="stage" aria-live="polite" aria-busy="true">
+    <!-- Estado inicial: esqueleto de carga (se sustituye desde app.js) -->
+    <div class="group">
+      <ul class="rows">
+        <li class="row"><span class="sk sk-tile"></span><span class="row-text"><span class="sk sk-line w-58"></span><span class="sk sk-line sk-line-sm w-30"></span></span><span class="sk sk-btn"></span></li>
+        <li class="row"><span class="sk sk-tile"></span><span class="row-text"><span class="sk sk-line w-72"></span><span class="sk sk-line sk-line-sm w-24"></span></span><span class="sk sk-btn"></span></li>
+        <li class="row"><span class="sk sk-tile"></span><span class="row-text"><span class="sk sk-line w-44"></span><span class="sk sk-line sk-line-sm w-34"></span></span><span class="sk sk-btn"></span></li>
+        <li class="row"><span class="sk sk-tile"></span><span class="row-text"><span class="sk sk-line w-64"></span><span class="sk sk-line sk-line-sm w-24"></span></span><span class="sk sk-btn"></span></li>
+        <li class="row"><span class="sk sk-tile"></span><span class="row-text"><span class="sk sk-line w-50"></span><span class="sk sk-line sk-line-sm w-30"></span></span><span class="sk sk-btn"></span></li>
+      </ul>
+    </div>
+    <p class="sr-only">Cargando la lista de archivos.</p>
+  </main>
+
+  <footer class="foot" id="foot">
+    <p>Los archivos se envían directamente desde el equipo de quien los comparte.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>File Transfer Easy</title>
+<script>window.__FTE_TOKEN__="__FTE_TOKEN__";</script>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- ─────────────────────────  icon sprite (inline SVG only)  ───────────────────────── -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 10.4 13.6"/><path d="M21 3l-6.6 18-3.8-7.6L3 9.6 21 3z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.3a2 2 0 0 1 1.6.8l1 1.4a2 2 0 0 0 1.6.8h5.5A2.5 2.5 0 0 1 21 10.5v6A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a2 2 0 0 0 2 2h4"/><path d="M19.5 9.2V18a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3H14z"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5h16M4 8.5V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1.5"/><path d="M5.6 8.5V18A2.5 2.5 0 0 0 8.1 20.5h7.8A2.5 2.5 0 0 0 18.4 18V8.5"/><path d="M10.4 12.6h3.2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 6.8h15.6"/><path d="M9.6 6.8V5.4A1.5 1.5 0 0 1 11.1 3.9h1.8a1.5 1.5 0 0 1 1.5 1.5v1.4"/><path d="M6.6 6.8l.8 11.3a2 2 0 0 0 2 1.9h5.2a2 2 0 0 0 2-1.9l.8-11.3"/><path d="M10.4 10.4v5.6M13.6 10.4v5.6"/></symbol>
+  <symbol id="i-reveal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-8.4 8.4"/><path d="M18.5 14.4V18a2.5 2.5 0 0 1-2.5 2.5H6.5A2.5 2.5 0 0 1 4 18V8.5A2.5 2.5 0 0 1 6.5 6h3.6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9.6A2.6 2.6 0 0 1 11.6 7h5.8A2.6 2.6 0 0 1 20 9.6v5.8A2.6 2.6 0 0 1 17.4 18h-5.8A2.6 2.6 0 0 1 9 15.4z"/><path d="M15 7v-.6A2.4 2.4 0 0 0 12.6 4H6.4A2.4 2.4 0 0 0 4 6.4v6.2A2.4 2.4 0 0 0 6.4 15H7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.6l4.4 4.4L19 7.4"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/><path d="M3.5 9.2h17M3.5 14.8h17"/><path d="M12 3c2.4 2.7 3.7 5.7 3.7 9S14.4 18.3 12 21c-2.4-2.7-3.7-5.7-3.7-9S9.6 5.7 12 3z"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 10.4a10.5 10.5 0 0 1 14.8 0"/><path d="M7.7 13.6a6.1 6.1 0 0 1 8.6 0"/><path d="M10.8 16.8a1.7 1.7 0 0 1 2.4 0"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 20v-1.6a4.3 4.3 0 0 0-4.3-4.3H7.3A4.3 4.3 0 0 0 3 18.4V20"/><path d="M9.25 11.2a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2z"/><path d="M21 20v-1.6a4.3 4.3 0 0 0-3.2-4.15"/><path d="M15.2 4.25a4.3 4.3 0 0 1 0 6.9"/></symbol>
+  <symbol id="i-user-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.4 20v-1.5a4.2 4.2 0 0 0-4.2-4.2H6.7A4.2 4.2 0 0 0 2.5 18.5V20"/><path d="M8.45 10.9a3.45 3.45 0 1 0 0-6.9 3.45 3.45 0 0 0 0 6.9z"/><path d="M17 11.4h4.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.8v10.4"/><path d="M8 10.4l4 4 4-4"/><path d="M4.6 18.6h14.8"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 4.4 3.4 17a1.6 1.6 0 0 0 1.4 2.4h14.4a1.6 1.6 0 0 0 1.4-2.4L13.4 4.4a1.6 1.6 0 0 0-2.8 0z"/><path d="M12 9.2v4.2M12 16.4v.3"/></symbol>
+  <symbol id="i-tray" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v8.6"/><path d="M8.6 8.8l3.4 3.4 3.4-3.4"/><path d="M4.5 14.2v2.3A2.5 2.5 0 0 0 7 19h10a2.5 2.5 0 0 0 2.5-2.5v-2.3"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><path d="M4.6 6.5h.01M4.6 12h.01M4.6 17.5h.01"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5l3.6 3.6L5 14.7"/><path d="M11.6 15.6h7"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- ─────────────────────────  title bar (drag region)  ───────────────────────── -->
+  <header class="topbar" id="topbar">
+    <div class="brand">
+      <span class="brandmark" aria-hidden="true"><svg class="ico ico-sm" viewBox="0 0 24 24"><use href="#i-send"/></svg></span>
+      <span class="brand-name">File Transfer&nbsp;Easy</span>
+    </div>
+    <div class="topbar-right">
+      <span class="chip chip-live" id="reconnect" hidden><span class="chip-dot"></span>reconectando…</span>
+
+      <button type="button" class="btn btn-sm nodrag is-off" id="btn-preview"
+              aria-disabled="true"
+              title="Disponible cuando el enlace esté activo. Pulsa «Compartir» para crearlo.">
+        <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-reveal"/></svg>
+        <span class="btn-label">Vista pública</span>
+      </button>
+
+      <button type="button" class="btn btn-sm btn-ghost nodrag" id="btn-hide"
+              title="Cierra la ventana pero sigue compartiendo desde la barra de menú (macOS) o la bandeja del sistema (Windows). Haz clic en ese icono para volver.">
+        <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-tray"/></svg>
+        <span class="btn-label">Ocultar</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+
+    <!-- ─────────────────────────  1. empty state  ───────────────────────── -->
+    <section class="empty" id="view-empty" hidden>
+      <div class="dropzone">
+        <span class="glow" aria-hidden="true"></span>
+        <div class="hero">
+          <svg class="hero-glyph" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path class="hero-arrow" d="M48 14v30"/>
+            <path class="hero-arrow" d="M36 32l12 12 12-12"/>
+            <path d="M14 56v14a9 9 0 0 0 9 9h50a9 9 0 0 0 9-9V56"/>
+            <path d="M14 56h17.5l4.5 8h24l4.5-8H82"/>
+            <path class="hero-spark" d="M24 34h.01M72 40h.01M28 22h.01"/>
+          </svg>
+        </div>
+        <h1 class="empty-title">Arrastra archivos o carpetas aquí</h1>
+        <p class="empty-sub">Se comparten desde donde están: si mueves o borras un archivo, deja de estar disponible en el enlace.</p>
+        <div class="empty-actions">
+          <button type="button" class="btn btn-primary btn-lg" data-act="add-files">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+            <span class="spin" aria-hidden="true"></span>
+            <span class="btn-label">Añadir archivos</span>
+          </button>
+          <button type="button" class="btn btn-lg" data-act="add-folder">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
+            <span class="spin" aria-hidden="true"></span>
+            <span class="btn-label">Añadir carpeta</span>
+          </button>
+        </div>
+        <div class="empty-facts">
+          <p class="fact">
+            <kbd class="k-mac">⌘O</kbd><kbd class="k-win">Ctrl + O</kbd> abre el selector de archivos
+            ·
+            <kbd class="k-mac">⇧⌘O</kbd><kbd class="k-win">Ctrl + Mayús + O</kbd> el de carpetas
+          </p>
+          <p class="fact mac-only">También puedes soltar archivos sobre el icono del Dock, aunque la ventana esté oculta.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────  2. active state  ───────────────────────── -->
+    <div class="content" id="view-active" hidden>
+
+      <!-- hero: the public link -->
+      <section class="linkcard" id="linkcard" aria-label="Enlace público">
+        <div class="linkcard-main">
+          <div class="linkcard-head">
+            <span class="statuspill is-neutral" id="status-pill">
+              <span class="statuspill-dot" aria-hidden="true"></span>
+              <span id="status-text">Listo</span>
+            </span>
+            <span class="since" id="share-since" hidden></span>
+            <button type="button" class="btn btn-sm btn-ghost linkcard-toggle" id="btn-share-toggle">
+              <span class="btn-label">Compartir</span>
+            </button>
+          </div>
+
+          <div class="urlrow">
+            <div class="urlpill" id="url-pill">
+              <svg class="ico ico-sm urlpill-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-globe"/></svg>
+              <span class="urlpill-text mono" id="url-text" hidden></span>
+              <span class="urlpill-hint" id="url-hint">Todavía no hay enlace: pulsa «Compartir» para crearlo</span>
+              <span class="skeleton" id="url-skeleton" aria-hidden="true" hidden></span>
+            </div>
+            <div class="urlactions">
+              <button type="button" class="btn btn-primary btn-lg copybtn" id="btn-copy" disabled>
+                <svg class="ico ico-copy" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy"/></svg>
+                <svg class="ico ico-done" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg>
+                <span class="btn-label" id="copy-label">Copiar</span>
+              </button>
+              <button type="button" class="btn btn-lg is-off" id="btn-open" aria-disabled="true"
+                      title="Disponible cuando el enlace esté activo.">
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-reveal"/></svg>
+                <span class="btn-label">Abrir</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="linkcard-foot" id="link-foot" hidden>
+            <span class="lanline" id="lan-line" hidden>
+              <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-wifi"/></svg>
+              <span>Misma red:</span>
+              <span class="mono" id="lan-url"></span>
+            </span>
+          </div>
+
+          <p class="errorbox" id="share-error" hidden>
+            <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-alert"/></svg>
+            <span id="share-error-text"></span>
+          </p>
+        </div>
+
+        <figure class="qrwrap" id="qr-wrap" hidden>
+          <img class="qr" id="qr-img" alt="Código QR del enlace público" width="120" height="120">
+          <figcaption class="qr-cap">Escanea</figcaption>
+        </figure>
+      </section>
+
+      <!-- one-line session totals -->
+      <section class="statbar" aria-label="Totales de esta sesión">
+        <span class="statbit"><span class="stat-value" id="st-downloads">0</span><span class="stat-label">descargas</span></span>
+        <span class="statbit"><span class="stat-value" id="st-bytes">0 B</span><span class="stat-label">enviados</span></span>
+        <span class="statbit"><span class="stat-value" id="st-visitors">0</span><span class="stat-label">visitantes</span></span>
+        <span class="statbit"><span class="stat-value" id="st-active">0</span><span class="stat-label">en curso</span></span>
+      </section>
+
+      <!-- two columns: activity leads, contents follows -->
+      <div class="columns">
+
+        <!-- activity -->
+        <section class="panel panel-activity" aria-label="Actividad">
+          <header class="panel-head">
+            <span class="panel-title">
+              <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"/></svg>
+              Transferencias
+            </span>
+            <span class="panel-meta" id="tr-meta"></span>
+            <span class="count" id="tr-count">0</span>
+          </header>
+          <ul class="list list-transfers scroller" id="transfers-list"></ul>
+          <p class="empty-line" id="transfers-empty">Sin descargas en curso</p>
+
+          <div class="subpanel">
+            <div class="subhead">
+              <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-users"/></svg>
+              <span>Visitantes</span>
+              <span class="count" id="vi-count">0</span>
+            </div>
+            <ul class="list list-visitors scroller" id="visitors-list"></ul>
+            <p class="empty-line" id="visitors-empty">Nadie ha abierto el enlace todavía</p>
+          </div>
+        </section>
+
+        <!-- items -->
+        <section class="panel panel-items" aria-label="Elementos compartidos">
+          <header class="panel-head">
+            <span class="panel-title">
+              <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-list"/></svg>
+              Contenido
+            </span>
+            <span class="panel-meta" id="items-totals"></span>
+            <span class="panel-actions">
+              <button type="button" class="btn btn-sm" data-act="add-files">
+                <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+                <span class="spin" aria-hidden="true"></span>
+                <span class="btn-label">Archivos</span>
+              </button>
+              <button type="button" class="btn btn-sm" data-act="add-folder">
+                <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
+                <span class="spin" aria-hidden="true"></span>
+                <span class="btn-label">Carpeta</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-ghost" id="btn-clear">
+                <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"/></svg>
+                <span class="btn-label">Vaciar</span>
+              </button>
+            </span>
+          </header>
+          <ul class="list list-items scroller" id="items-list"></ul>
+        </section>
+      </div>
+
+      <!-- log -->
+      <details class="logbox" id="logbox">
+        <summary>
+          <svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-terminal"/></svg>
+          <span>Registro</span>
+          <span class="count" id="log-count">0</span>
+        </summary>
+        <div class="loglines mono scroller" id="log-lines"></div>
+      </details>
+
+    </div>
+  </main>
+</div>
+
+<!-- drag & drop overlay -->
+<div class="veil" id="veil" aria-hidden="true">
+  <div class="veil-inner">
+    <div class="veil-card">
+      <svg class="ico veil-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"/></svg>
+      <span>Suelta para compartir</span>
+    </div>
+  </div>
+</div>
+
+<!-- toasts -->
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
