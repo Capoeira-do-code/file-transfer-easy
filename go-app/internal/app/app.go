@@ -42,11 +42,18 @@ type Summary struct {
 	Status     ShareStatus
 	StatusText string
 	URL        string
+	LANURL     string
 	Items      int
 	Files      int
 	BytesText  string
 	Online     int // visitors currently viewing the link
 	Active     int // downloads in flight
+}
+
+type tunnelRunner interface {
+	Start(context.Context, int, func(error)) (string, error)
+	Stop()
+	Running() bool
 }
 
 // App is the application core.
@@ -56,21 +63,26 @@ type App struct {
 
 	dataDir      string
 	native       Native
-	tunnel       *tunnel.Runner
+	tunnel       tunnelRunner
+	waitDNS      func(context.Context, string, tunnel.Logf) bool
 	publicAssets fs.FS
 
-	mu         sync.RWMutex
-	status     ShareStatus
-	publicURL  string
-	lanURL     string
-	shareError string
-	liveSince  time.Time
-	shareToken string
-	publicPort int
-	publicSrv  *http.Server
+	mu            sync.RWMutex
+	status        ShareStatus
+	publicURL     string
+	lanURL        string
+	shareError    string
+	liveSince     time.Time
+	shareToken    string
+	publicPort    int
+	publicSrv     *http.Server
+	shareCtx      context.Context
+	shareCancel   context.CancelFunc
+	stopRequested bool
 
 	// shareMu serialises start/stop so two clicks cannot race.
 	shareMu sync.Mutex
+	stopMu  sync.Mutex
 
 	// Broadcast plumbing for the SSE stream.
 	busMu    sync.Mutex
@@ -88,6 +100,7 @@ func New(dataDir string, native Native, publicAssets fs.FS) *App {
 		native:       native,
 		publicAssets: publicAssets,
 		status:       StatusIdle,
+		waitDNS:      tunnel.WaitUntilResolvable,
 		clients:      make(map[chan []byte]struct{}),
 		dirty:        make(chan struct{}, 1),
 		shutdown:     make(chan struct{}),
@@ -109,14 +122,12 @@ func (a *App) Close() {
 	})
 }
 
-func newToken() string {
+func newToken() (string, error) {
 	buf := make([]byte, 18)
 	if _, err := rand.Read(buf); err != nil {
-		// crypto/rand only fails catastrophically; fall back to a time seed so
-		// the app still runs rather than dying on a share click.
-		return base64.RawURLEncoding.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano)))
+		return "", fmt.Errorf("no se pudo generar un enlace seguro: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(buf)
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // ---------------------------------------------------------------- broadcasting
@@ -318,40 +329,72 @@ func (a *App) Status() ShareStatus {
 	return a.status
 }
 
-func (a *App) setStatus(status ShareStatus, shareErr string) {
-	a.mu.Lock()
-	a.status = status
-	a.shareError = shareErr
-	if status == StatusLive {
-		a.liveSince = time.Now()
-	}
-	if status != StatusLive {
-		a.publicURL = ""
-	}
-	a.mu.Unlock()
-
-	a.MarkDirty()
-}
-
 // StartShare brings up the public server and the cloudflared tunnel.
 func (a *App) StartShare() error {
 	a.shareMu.Lock()
 	defer a.shareMu.Unlock()
 
-	if a.Status() == StatusLive {
+	a.mu.Lock()
+	select {
+	case <-a.shutdown:
+		a.mu.Unlock()
+		return errors.New("la aplicación se está cerrando")
+	default:
+	}
+	if a.stopRequested || a.status == StatusLive {
+		a.mu.Unlock()
 		return nil
 	}
 	if a.Store.IsEmpty() {
+		a.mu.Unlock()
 		return errors.New("añade algún archivo antes de compartir")
 	}
+	if a.shareCancel != nil {
+		a.shareCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.shareCtx, a.shareCancel = ctx, cancel
+	a.status, a.shareError, a.publicURL = StatusPreparing, "", ""
+	a.mu.Unlock()
+	a.MarkDirty()
 
-	a.setStatus(StatusPreparing, "")
+	// Retrying replaces the entire session, including the previous LAN
+	// listener. Nothing from a failed attempt is left serving an old token.
+	a.Tracker.CancelAll()
+	a.tunnel.Stop()
+	a.stopPublicServer()
+	a.mu.Lock()
+	a.lanURL, a.shareToken, a.publicPort = "", "", 0
+	a.liveSince = time.Time{}
+	a.mu.Unlock()
 
-	token := newToken()
+	fail := func(err error) error {
+		a.tunnel.Stop()
+		a.mu.Lock()
+		interrupted := ctx.Err() != nil || a.stopRequested
+		if !interrupted {
+			a.status, a.shareError, a.publicURL = StatusError, err.Error(), ""
+		}
+		a.mu.Unlock()
+		cancel()
+		a.MarkDirty()
+		if interrupted {
+			return nil
+		}
+		a.Tracker.Logf("error", "%s", err.Error())
+		return err
+	}
+
+	token, err := newToken()
+	if err != nil {
+		return fail(err)
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
 	port, err := a.startPublicServer(token)
 	if err != nil {
-		a.setStatus(StatusError, err.Error())
-		return err
+		return fail(err)
 	}
 
 	a.mu.Lock()
@@ -363,66 +406,98 @@ func (a *App) StartShare() error {
 	}
 	a.mu.Unlock()
 
-	if tunnel.Locate(a.dataDir) == "" {
-		a.setStatus(StatusInstalling, "")
-	} else {
-		a.setStatus(StatusStarting, "")
+	installing := tunnel.Locate(a.dataDir) == ""
+	a.mu.Lock()
+	if !a.stopRequested && ctx.Err() == nil {
+		if installing {
+			a.status = StatusInstalling
+		} else {
+			a.status = StatusStarting
+		}
 	}
+	a.mu.Unlock()
+	a.MarkDirty()
 
-	base, err := a.tunnel.Start(port, a.onTunnelDied)
+	base, err := a.tunnel.Start(ctx, port, func(err error) { a.onTunnelDied(ctx, err) })
 	if err != nil {
-		a.Tracker.Logf("error", "%s", err.Error())
-		// The LAN link still works, so leave the public server running and
-		// surface the failure instead of tearing everything down.
-		a.setStatus(StatusError, err.Error())
-		return err
+		return fail(err)
 	}
+	if ctx.Err() != nil {
+		return fail(ctx.Err())
+	}
+	a.mu.Lock()
+	if !a.stopRequested {
+		a.status = StatusStarting
+	}
+	a.mu.Unlock()
+	a.MarkDirty()
 
 	// cloudflared announces the URL before Cloudflare publishes its DNS record,
 	// and trycloudflare.com caches NXDOMAIN for 30 minutes. Handing the link
 	// over now would give the first person to open it a link that stays broken
 	// for half an hour, so wait for the name to actually resolve first.
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), 2*time.Minute)
-	tunnel.WaitUntilResolvable(waitCtx, base, a.Tracker.Logf)
+	waitCtx, cancelWait := context.WithTimeout(ctx, 2*time.Minute)
+	resolved := a.waitDNS(waitCtx, base, a.Tracker.Logf)
 	cancelWait()
-
-	// The user may have stopped sharing while we waited.
-	if a.Status() != StatusStarting && a.Status() != StatusInstalling {
-		return nil
+	if !resolved {
+		return fail(errors.New("no se pudo verificar el enlace público; puedes reintentar o usar el enlace de la misma red"))
+	}
+	if !a.tunnel.Running() {
+		return fail(errors.New("el túnel se cerró antes de que el enlace estuviera listo"))
 	}
 
 	a.mu.Lock()
+	if ctx.Err() != nil || a.stopRequested || a.status == StatusError {
+		a.mu.Unlock()
+		return nil
+	}
 	a.publicURL = base + "/s/" + token
 	url := a.publicURL
+	a.status, a.shareError, a.liveSince = StatusLive, "", time.Now()
 	a.mu.Unlock()
-
-	a.setStatus(StatusLive, "")
+	a.MarkDirty()
 	a.Tracker.Logf("info", "Enlace listo: %s", url)
 	return nil
 }
 
 // onTunnelDied handles cloudflared exiting without being asked to.
-func (a *App) onTunnelDied(err error) {
-	if a.Status() != StatusLive {
-		return
-	}
+func (a *App) onTunnelDied(ctx context.Context, err error) {
 	message := "el túnel se cerró de forma inesperada"
 	if err != nil {
 		message = "el túnel se cerró: " + err.Error()
 	}
+	a.mu.Lock()
+	if a.shareCtx != ctx || ctx.Err() != nil || a.stopRequested {
+		a.mu.Unlock()
+		return
+	}
+	a.status, a.shareError, a.publicURL = StatusError, message, ""
+	if a.shareCancel != nil {
+		a.shareCancel()
+	}
+	a.mu.Unlock()
+	a.MarkDirty()
 	a.Tracker.Logf("error", "%s", message)
-	a.setStatus(StatusError, message)
 }
 
 // StopShare tears down the tunnel and the public server.
 func (a *App) StopShare() error {
+	a.stopMu.Lock()
+	defer a.stopMu.Unlock()
+	// Cancel before waiting for StartShare's lifecycle lock: this interrupts
+	// the HTTP download, process startup and DNS lookup immediately.
+	a.mu.Lock()
+	a.stopRequested = true
+	if a.shareCancel != nil {
+		a.shareCancel()
+	}
+	if a.status != StatusIdle && a.status != StatusStopped {
+		a.status, a.publicURL = StatusStopping, ""
+	}
+	a.mu.Unlock()
+	a.MarkDirty()
 	a.shareMu.Lock()
 	defer a.shareMu.Unlock()
-
-	if a.Status() == StatusIdle {
-		return nil
-	}
-	a.setStatus(StatusStopping, "")
 
 	a.Tracker.CancelAll()
 	a.tunnel.Stop()
@@ -435,9 +510,12 @@ func (a *App) StopShare() error {
 	a.shareToken = ""
 	a.publicPort = 0
 	a.liveSince = time.Time{}
+	a.shareCtx, a.shareCancel = nil, nil
+	a.stopRequested = false
+	a.status, a.shareError = StatusStopped, ""
 	a.mu.Unlock()
 
-	a.setStatus(StatusStopped, "")
+	a.MarkDirty()
 	a.Tracker.Logf("info", "Has dejado de compartir")
 	return nil
 }
@@ -462,13 +540,11 @@ func (a *App) OpenPublicPage() error {
 func (a *App) CopyLink() error {
 	a.mu.RLock()
 	url := a.publicURL
-	if url == "" {
-		url = a.lanURL
-	}
+	live := a.status == StatusLive
 	a.mu.RUnlock()
 
-	if url == "" {
-		return errors.New("todavía no hay ningún enlace que copiar")
+	if !live || url == "" || !a.tunnel.Running() {
+		return errors.New("el enlace público todavía no está listo para copiar")
 	}
 	if !a.native.SetClipboard(url) {
 		return errors.New("no se pudo copiar al portapapeles")

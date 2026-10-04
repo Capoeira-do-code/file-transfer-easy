@@ -1,5 +1,9 @@
 # File Transfer Easy
 
+Para la app actual de escritorio, el build universal de macOS y los paquetes de Linux, usa la
+[versión Go](go-app/README.md). La documentación siguiente corresponde a la
+versión original en Python.
+
 App de escritorio para compartir archivos desde tu ordenador con una web cuidada para clientes y un panel admin integrado en una ventana nativa. Publica con Tailscale Funnel, Cloudflare Quick Tunnel o un puerto propio.
 
 El runtime es single-file: el HTML, CSS y JavaScript del panel admin y de la web pública viven embebidos dentro de `app.py`. No hacen falta carpetas `templates/` ni `static/` para ejecutar o compilar.
@@ -32,18 +36,26 @@ También puedes ejecutar:
 python app.py
 ```
 
-En macOS, usa un entorno virtual para mantener aislada la versión compatible de Qt:
+También puedes ejecutar directamente el `.py` en macOS o Linux:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python app.py
+python3 app.py
 ```
+
+Si falta Flask, Waitress o PySide6, el script prepara un entorno Python del
+usuario, instala las dependencias y vuelve a arrancar dentro de él. Funciona
+también al copiar solo `app.py`: las versiones necesarias están declaradas en
+el script. Si encuentra `requirements.txt` junto al archivo, usa ese archivo.
+Las siguientes ejecuciones reutilizan el entorno y los paquetes instalados.
+
+El entorno automático se guarda en `~/FileTransferEasy/python/` en macOS/Linux
+y en `%LOCALAPPDATA%\FileTransferEasy\python\` en Windows. Si ejecutas la app
+desde un entorno virtual propio, instala ahí los paquetes que falten. La primera
+instalación necesita conexión a Internet y una instalación de Python con `venv`.
 
 En versiones recientes de macOS, la app prepara automáticamente una ruta de compatibilidad para el plugin gráfico Cocoa antes de crear la ventana.
 
-Si faltan dependencias, la app intenta instalarlas automáticamente desde `requirements.txt`.
+Si la instalación falla, se conserva el diagnóstico de pip en el mensaje de error.
 
 La UI host/admin funciona solo con `PySide6` (sin `tkinter`) y es totalmente nativa Qt.
 El idioma de la app host (EN/ES) controla también los textos de la web pública.

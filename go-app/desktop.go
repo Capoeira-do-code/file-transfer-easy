@@ -123,6 +123,20 @@ func (d *desktopBridge) ShowWindow() {
 	}
 }
 
+// AddDroppedPaths handles file-open events and native icon drops alike.
+func (d *desktopBridge) AddDroppedPaths(paths []string) {
+	d.mu.RLock()
+	core := d.core
+	d.mu.RUnlock()
+	if core == nil || len(paths) == 0 {
+		return
+	}
+	if err := core.AddPaths(paths); err != nil {
+		core.Tracker.Logf("warn", "%s", err.Error())
+	}
+	d.ShowWindow()
+}
+
 // StateChanged keeps the tray summary in step with the app.
 //
 // It arrives on the broadcast goroutine, but updating a menu item reaches

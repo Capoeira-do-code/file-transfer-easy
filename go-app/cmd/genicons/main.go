@@ -103,10 +103,10 @@ func glyph() shape {
 	return union(shaft, head, tray)
 }
 
-// tint is the colour ramp used on the app icon, a soft vertical teal gradient.
+// tint is the colour ramp used on the app icon, a soft vertical indigo gradient.
 func tint(y float64) color.RGBA {
-	top := color.RGBA{R: 0x1f, G: 0xb0, B: 0x99, A: 0xff}
-	bottom := color.RGBA{R: 0x0b, G: 0x6f, B: 0x63, A: 0xff}
+	top := color.RGBA{R: 0x81, G: 0x78, B: 0xee, A: 0xff}
+	bottom := color.RGBA{R: 0x47, G: 0x40, B: 0xbd, A: 0xff}
 	mix := func(a, b uint8) uint8 { return uint8(float64(a) + (float64(b)-float64(a))*y) }
 	return color.RGBA{
 		R: mix(top.R, bottom.R),

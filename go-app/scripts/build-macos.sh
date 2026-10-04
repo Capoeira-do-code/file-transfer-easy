@@ -14,17 +14,32 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="File Transfer Easy"
 BUNDLE_ID="com.filetransfereasy.desktop"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 BINARY="file-transfer-easy"
 DIST="dist"
-APP_DIR="$DIST/$APP_NAME.app"
+FINAL_APP="$DIST/$APP_NAME.app"
+ARCH="${ARCH:-universal}"
 
 # Matching the SDK the toolchain actually targets keeps the linker quiet.
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 
 say() { printf '\033[36m▸\033[0m %s\n' "$1"; }
 
-rm -rf "$DIST"
+case "$ARCH" in universal|arm64|amd64) ;; *) echo "ARCH debe ser universal, arm64 o amd64" >&2; exit 1 ;; esac
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "VERSION debe usar el formato numérico X.Y.Z" >&2; exit 1
+fi
+if [[ ! "$MACOSX_DEPLOYMENT_TARGET" =~ ^[0-9]+\.[0-9]+$ ]]; then
+  echo "MACOSX_DEPLOYMENT_TARGET debe usar el formato X.Y" >&2; exit 1
+fi
+for tool in go clang lipo iconutil hdiutil codesign plutil shasum xattr xcrun; do
+  command -v "$tool" >/dev/null || { echo "Falta la herramienta: $tool" >&2; exit 1; }
+done
+xcrun --find clang >/dev/null
+mkdir -p "$DIST"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fte-build.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"' EXIT
+APP_DIR="$WORK_DIR/$APP_NAME.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 # ---------------------------------------------------------------- the binary
@@ -40,17 +55,17 @@ build_arch() {
     CGO_LDFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
     go build -trimpath \
       -ldflags "-s -w -X main.version=$VERSION" \
-      -o "$out" . 2> >(grep -v 'ld: warning' >&2 || true)
+      -o "$out" .
 }
 
 TARGET="$APP_DIR/Contents/MacOS/$BINARY"
 
-if [[ "${ARCH:-universal}" == "universal" ]]; then
-  build_arch arm64 "$DIST/$BINARY-arm64"
-  build_arch amd64 "$DIST/$BINARY-amd64"
+if [[ "$ARCH" == "universal" ]]; then
+  build_arch arm64 "$WORK_DIR/$BINARY-arm64"
+  build_arch amd64 "$WORK_DIR/$BINARY-amd64"
   say "Uniendo en un binario universal…"
-  lipo -create -output "$TARGET" "$DIST/$BINARY-arm64" "$DIST/$BINARY-amd64"
-  rm -f "$DIST/$BINARY-arm64" "$DIST/$BINARY-amd64"
+  lipo -create -output "$TARGET" "$WORK_DIR/$BINARY-arm64" "$WORK_DIR/$BINARY-amd64"
+  rm -f "$WORK_DIR/$BINARY-arm64" "$WORK_DIR/$BINARY-amd64"
 else
   build_arch "$ARCH" "$TARGET"
 fi
@@ -60,7 +75,7 @@ chmod +x "$TARGET"
 # ------------------------------------------------------------------ the icon
 
 say "Construyendo el icono del paquete…"
-ICONSET="$DIST/icon.iconset"
+ICONSET="$WORK_DIR/icon.iconset"
 mkdir -p "$ICONSET"
 cp build/icons/iconset/icon_16.png   "$ICONSET/icon_16x16.png"
 cp build/icons/iconset/icon_32.png   "$ICONSET/icon_16x16@2x.png"
@@ -117,17 +132,42 @@ PLIST
 # Extended attributes picked up during the build make codesign refuse the
 # bundle outright, so they are stripped first.
 say "Firmando de forma ad-hoc…"
-xattr -cr "$APP_DIR" 2>/dev/null || true
-codesign --force --deep --sign - "$APP_DIR" || \
-  say "No se pudo firmar (se puede abrir igualmente con clic derecho › Abrir)"
+xattr -cr "$APP_DIR"
+plutil -lint "$APP_DIR/Contents/Info.plist"
+codesign --force --sign - "$APP_DIR"
+codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+if [[ "$ARCH" == "universal" ]]; then
+  lipo "$TARGET" -verify_arch arm64
+  lipo "$TARGET" -verify_arch x86_64
+elif [[ "$ARCH" == "amd64" ]]; then
+  lipo "$TARGET" -verify_arch x86_64
+else
+  lipo "$TARGET" -verify_arch arm64
+fi
 
 # -------------------------------------------------------------------- the dmg
 
 say "Creando el .dmg…"
-STAGING="$DIST/dmg"
+STAGING="$WORK_DIR/dmg"
 mkdir -p "$STAGING"
 cp -R "$APP_DIR" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
+cat > "$STAGING/Instalación.txt" <<INSTALL
+File Transfer Easy $VERSION
+
+1. Arrastra File Transfer Easy a Aplicaciones.
+2. Abre la app y añade tus archivos o carpetas.
+3. Espera a que el enlace esté listo, cópialo y envíalo.
+
+Mantén tu equipo encendido y la app abierta mientras compartes.
+Cerrar la ventana mantiene la app en la barra de menús. Usa Salir para detenerla.
+
+Este paquete de prueba tiene firma ad hoc, sin notarización de Apple.
+Gatekeeper puede bloquearlo en otros equipos. La distribución pública requiere
+Developer ID y notarización; no se modifican las protecciones del sistema.
+
+La primera compartición descarga cloudflared de la fuente oficial de Cloudflare.
+INSTALL
 
 DMG="$DIST/FileTransferEasy-$VERSION.dmg"
 hdiutil create \
@@ -135,8 +175,14 @@ hdiutil create \
   -srcfolder "$STAGING" \
   -ov -format UDZO \
   "$DMG" >/dev/null
-rm -rf "$STAGING"
+hdiutil verify "$DMG" >/dev/null
+rm -rf "$FINAL_APP"
+mv "$APP_DIR" "$FINAL_APP"
+xattr -cr "$FINAL_APP"
+codesign --verify --deep --strict --verbose=2 "$FINAL_APP"
+(cd "$DIST" && shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256")
 
 say "Listo:"
-echo "    $APP_DIR"
+echo "    $FINAL_APP"
 echo "    $DMG"
+echo "    $DMG.sha256"

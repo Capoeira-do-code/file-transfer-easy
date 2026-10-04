@@ -24,7 +24,7 @@ var publicResolvers = []string{"1.1.1.1:53", "8.8.8.8:53"}
 const (
 	resolvePollInterval = 1 * time.Second
 	resolveTimeout      = 90 * time.Second
-	// blindWait is how long to wait before going ahead anyway when the public
+	// blindWait is how long to wait before failing when the public
 	// resolvers cannot be reached at all, e.g. on a network that blocks
 	// outbound DNS. It is comfortably longer than the delay seen in practice.
 	blindWait = 25 * time.Second
@@ -45,8 +45,7 @@ func newDirectResolver(server string) *net.Resolver {
 // WaitUntilResolvable blocks until the host in rawURL resolves publicly, or the
 // timeout expires. It reports whether the name was actually seen to resolve.
 //
-// A false return is not necessarily fatal: the caller may still publish the
-// link, it just cannot promise the record is live yet.
+// A false return means callers must not advertise the link as ready.
 func WaitUntilResolvable(ctx context.Context, rawURL string, log Logf) bool {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -78,6 +77,9 @@ func WaitUntilResolvable(ctx context.Context, rawURL string, log Logf) bool {
 	started := time.Now()
 
 	for {
+		if ctx.Err() != nil {
+			return false
+		}
 		for _, resolver := range resolvers {
 			lookup, cancel := context.WithTimeout(ctx, 4*time.Second)
 			addrs, err := resolver.LookupHost(lookup, host)
@@ -104,7 +106,7 @@ func WaitUntilResolvable(ctx context.Context, rawURL string, log Logf) bool {
 		case <-blind:
 			if !reachable {
 				if log != nil {
-					log("warn", "No se pudo consultar el DNS público; se publica el enlace de todos modos")
+					log("warn", "No se pudo verificar el DNS público; el enlace aún no está listo")
 				}
 				return false
 			}

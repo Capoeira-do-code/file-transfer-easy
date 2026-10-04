@@ -4,7 +4,7 @@
 //
 // The window is a Wails v3 webview pointed at a loopback HTTP server, so the
 // whole UI is plain HTML talking plain HTTP. Sharing happens over a Cloudflare
-// quick tunnel run by the bundled cloudflared.
+// quick tunnel run by the installed cloudflared.
 package main
 
 import (
@@ -72,6 +72,9 @@ func run() error {
 		Name:        appName,
 		Description: "Envía archivos entre dispositivos que no están en la misma red · " + version,
 		Icon:        icon("appicon.png"),
+		Linux: application.LinuxOptions{
+			ProgramName: "file_transfer_easy",
+		},
 		Mac: application.MacOptions{
 			ActivationPolicy: application.ActivationPolicyRegular,
 			// Closing the window hides it to the tray, so the app must survive
@@ -81,10 +84,10 @@ func run() error {
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "com.filetransfereasy.desktop",
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
-				// On Windows, dropping files on the executable or a shortcut
-				// launches a second instance with them as arguments.
-				if paths := existingPaths(data.Args); len(paths) > 0 {
-					core.AddPaths(paths)
+				// File-manager launches can pass files to an existing session.
+				if paths := launchPaths(data.Args, data.WorkingDir); len(paths) > 0 {
+					desktop.AddDroppedPaths(paths)
+					return
 				}
 				desktop.ShowWindow()
 			},
@@ -107,7 +110,7 @@ func run() error {
 		// page, which is what lets the UI stay a plain sandboxed web page.
 		EnableFileDrop:             true,
 		DefaultContextMenuDisabled: true,
-		BackgroundColour:           application.NewRGB(15, 22, 24),
+		BackgroundColour:           application.NewRGB(22, 22, 29),
 		InitialPosition:            application.WindowCentered,
 		Mac: application.MacWindow{
 			// The inset title bar gives the traffic lights room while letting
@@ -119,6 +122,10 @@ func run() error {
 	})
 
 	desktop.attach(wails, window, core)
+	// Clicking the Dock icon should bring a hidden sharing window back.
+	wails.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
+		desktop.ShowWindow()
+	})
 
 	window.OnWindowEvent(events.Common.WindowFilesDropped, func(event *application.WindowEvent) {
 		paths := event.Context().DroppedFiles()
@@ -141,20 +148,19 @@ func run() error {
 	// has to be built from the started event rather than before Run().
 	wails.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		buildTray(wails, core, desktop)
+		if paths := launchPaths(os.Args, ""); len(paths) > 0 {
+			desktop.AddDroppedPaths(paths)
+		}
 	})
 
 	// Files dropped on the Dock icon (macOS) or opened with the app (Windows)
-	// are added straight away, which is what makes adding things possible while
-	// the window is hidden. The system tray icon itself cannot accept drops:
-	// neither Wails nor the platforms expose that.
+	// are added even when the window is hidden.
 	wails.Event.OnApplicationEvent(events.Common.ApplicationOpenedWithFile, func(event *application.ApplicationEvent) {
 		path := event.Context().Filename()
 		if path == "" {
 			return
 		}
-		if err := core.AddPaths([]string{path}); err != nil {
-			core.Tracker.Logf("warn", "%s", err.Error())
-		}
+		desktop.AddDroppedPaths([]string{path})
 	})
 
 	return wails.Run()
@@ -177,13 +183,19 @@ func ensureDataDir() (string, error) {
 	return dir, nil
 }
 
-// existingPaths keeps only the arguments that name something on disk, so that
-// flags and stray arguments are never mistaken for files to share.
-func existingPaths(args []string) []string {
+// launchPaths consumes a full argv (including argv[0], the executable). A
+// second instance can have a different working directory from this session.
+func launchPaths(args []string, workingDir string) []string {
 	var paths []string
-	for _, arg := range args {
+	if len(args) < 2 {
+		return paths
+	}
+	for _, arg := range args[1:] {
 		if arg == "" || strings.HasPrefix(arg, "-") {
 			continue
+		}
+		if workingDir != "" && !filepath.IsAbs(arg) {
+			arg = filepath.Join(workingDir, arg)
 		}
 		if _, err := os.Stat(arg); err == nil {
 			paths = append(paths, arg)

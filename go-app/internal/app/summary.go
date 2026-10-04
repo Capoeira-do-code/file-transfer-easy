@@ -11,6 +11,7 @@ func summaryOf(state State) Summary {
 		Status:     ShareStatus(state.Share.Status),
 		StatusText: state.Share.StatusText,
 		URL:        state.Share.URL,
+		LANURL:     state.Share.LanURL,
 		Items:      state.Totals.Items,
 		Files:      state.Totals.Files,
 		BytesText:  state.Totals.BytesText,

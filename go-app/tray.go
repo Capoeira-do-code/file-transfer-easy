@@ -12,6 +12,9 @@ import (
 // area. The top of the menu is a live summary, so the user can see what is
 // being shared and who is on it without opening the window at all.
 func buildTray(wails *application.App, core *app.App, desktop *desktopBridge) {
+	if buildNativeTray(wails, core, desktop) {
+		return
+	}
 	tray := wails.SystemTray.New()
 
 	if runtime.GOOS == "darwin" {
@@ -83,7 +86,11 @@ func buildTray(wails *application.App, core *app.App, desktop *desktopBridge) {
 	})
 
 	tray.SetMenu(menu)
-	tray.OnClick(func() { desktop.ShowWindow() })
+	if runtime.GOOS == "darwin" {
+		tray.OnClick(tray.ShowMenu)
+	} else {
+		tray.OnClick(func() { desktop.ShowWindow() })
+	}
 
 	desktop.adoptTray(&trayHandles{
 		tray:     tray,
@@ -99,12 +106,13 @@ func buildTray(wails *application.App, core *app.App, desktop *desktopBridge) {
 
 // trayHandles are the menu items the bridge keeps up to date.
 type trayHandles struct {
-	tray     *application.SystemTray
-	content  *application.MenuItem
-	activity *application.MenuItem
-	copyLink *application.MenuItem
-	openPage *application.MenuItem
-	stop     *application.MenuItem
+	refreshNative func(app.Summary)
+	tray          *application.SystemTray
+	content       *application.MenuItem
+	activity      *application.MenuItem
+	copyLink      *application.MenuItem
+	openPage      *application.MenuItem
+	stop          *application.MenuItem
 }
 
 // refresh rewrites the summary lines and enables only the actions that can
@@ -113,13 +121,17 @@ func (h *trayHandles) refresh(summary app.Summary) {
 	if h == nil {
 		return
 	}
+	if h.refreshNative != nil {
+		h.refreshNative(summary)
+		return
+	}
 
 	h.content.SetLabel(summary.ContentLine())
 	h.activity.SetLabel(summary.ActivityLine())
 
 	live := summary.Status == app.StatusLive && summary.URL != ""
 	h.copyLink.SetEnabled(live)
-	h.openPage.SetEnabled(live)
+	h.openPage.SetEnabled(live || summary.LANURL != "")
 	h.stop.SetEnabled(summary.Status != app.StatusIdle && summary.Status != app.StatusStopped)
 
 	h.tray.SetTooltip(summary.Tooltip())

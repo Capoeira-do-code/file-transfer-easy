@@ -3,32 +3,31 @@
    Tokens del contrato compartido. Ningún color fuera de :root.
    ========================================================================== */
 
+/* Appearance matches the desktop app; all assets remain local. */
 :root{
-  --bg:#f4f7f8;            --bg-elev:#ffffff;      --bg-sunken:#eaf0f1;
-  --ink:#12212c;           --ink-soft:#4a5f66;     --ink-faint:#7b8e94;
-  --line:#dae5e7;          --line-strong:#bccdd0;
-  --accent:#0f8a7a;        --accent-hover:#0b7365; --accent-ink:#ffffff;
-  --accent-soft:#dff3ee;   --accent-ring:rgba(15,138,122,.35);
-  --danger:#d1544a;        --danger-soft:#fde8e6;
-  --warn:#c8862c;          --ok:#2e9e6b;
-  --shadow-sm:0 1px 2px rgba(16,38,48,.06),0 2px 8px rgba(16,38,48,.05);
-  --shadow-lg:0 18px 48px rgba(16,38,48,.12);
-  --radius:14px;  --radius-sm:9px;  --radius-lg:20px;
-  --font:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Display","Segoe UI",Inter,system-ui,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light dark;
+  --bg:#f6f6f9; --bg-elev:#ffffff; --bg-sunken:#f0f0f6;
+  --ink:#20202e; --ink-soft:#606071; --ink-faint:#6c6c80;
+  --line:#e5e5ed; --line-strong:#d2d2e0;
+  --accent:#5850d9; --accent-hover:#4740bd; --accent-ink:#fff;
+  --accent-soft:#eeedff; --accent-ring:rgba(88,80,217,.26);
+  --danger:#b33a45; --danger-soft:#fff0f1; --warn:#885c16; --ok:#207349;
+  --shadow-sm:0 2px 6px rgba(32,32,46,.025),0 12px 32px rgba(32,32,46,.035);
+  --shadow-lg:0 18px 48px rgba(32,32,46,.10);
+  --radius:14px; --radius-sm:9px; --radius-lg:18px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --ease:cubic-bezier(.2,.7,.3,1);
 }
-@media (prefers-color-scheme:dark){
+@media(prefers-color-scheme:dark){
   :root{
-    --bg:#0e1618;          --bg-elev:#162226;      --bg-sunken:#0a1113;
-    --ink:#e8f1f2;         --ink-soft:#a3b8bc;     --ink-faint:#71888d;
-    --line:#24343a;        --line-strong:#35494f;
-    --accent:#2fbfa6;      --accent-hover:#45d3ba; --accent-ink:#04231f;
-    --accent-soft:#12332f; --accent-ring:rgba(47,191,166,.35);
-    --danger:#f0766a;      --danger-soft:#3a1e1c;
-    --warn:#e0a144;        --ok:#4fc98d;
-    --shadow-sm:0 1px 2px rgba(0,0,0,.3),0 2px 8px rgba(0,0,0,.25);
-    --shadow-lg:0 18px 48px rgba(0,0,0,.45);
+    --bg:#16161d; --bg-elev:#202029; --bg-sunken:#282833;
+    --ink:#f1f1f8; --ink-soft:#b1b1c3; --ink-faint:#a0a0b5;
+    --line:#343441; --line-strong:#4a4a5d;
+    --accent:#aca5ff; --accent-hover:#c2bcff; --accent-ink:#211b4a;
+    --accent-soft:#302b50; --accent-ring:rgba(172,165,255,.35);
+    --danger:#ffa3ad; --danger-soft:#42262e; --warn:#e6c082; --ok:#8edab0;
+    --shadow-sm:0 2px 8px rgba(0,0,0,.08); --shadow-lg:0 18px 48px rgba(0,0,0,.3);
   }
 }
 
@@ -82,9 +81,9 @@ a{color:var(--accent)}
 
 .page{
   width:100%;
-  max-width:780px;
+  max-width:840px;
   margin:0 auto;
-  padding:clamp(22px,5vw,52px) clamp(14px,4vw,26px) 64px;
+  padding:clamp(24px,6vw,64px) clamp(16px,4vw,32px) 48px;
 }
 
 /* ------------------------------------------------------------- header --- */
@@ -101,8 +100,8 @@ a{color:var(--accent)}
   width:36px;height:36px;flex:none;
   display:grid;place-items:center;
   border-radius:11px;
-  background:var(--accent-soft);
-  color:var(--accent);
+  background:var(--accent);
+  color:var(--accent-ink);
 }
 .brand-mark svg{width:21px;height:21px;display:block}
 .brand-name{
@@ -113,7 +112,7 @@ a{color:var(--accent)}
 
 .title{
   margin:clamp(20px,4vw,30px) 0 10px;
-  font-size:clamp(1.6rem,1.05rem + 2.6vw,2.2rem);
+  font-size:clamp(2rem,1.3rem + 3vw,3rem);
   line-height:1.14;
   letter-spacing:-.022em;
   font-weight:650;
@@ -306,7 +305,7 @@ a{color:var(--accent)}
 .icon-btn:hover{background:var(--accent-soft);border-color:var(--accent-ring);color:var(--accent)}
 
 /* carpeta plegable */
-.folder{border:0}
+.folder{border:1px solid var(--line)}
 .folder-head{
   cursor:pointer;
   list-style:none;
@@ -479,3 +478,19 @@ a{color:var(--accent)}
   .hint-dot,
   .live-dot{opacity:1;transform:none}
 }
+
+[hidden]{display:none!important}
+.eyebrow{margin-top:36px;color:var(--ink-faint);font-size:10px;font-weight:700;letter-spacing:.16em}
+.title{margin-top:12px;letter-spacing:-.035em;line-height:1.12}
+.title span{color:var(--accent)}
+.cta{padding:22px;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--bg-elev);box-shadow:var(--shadow-sm)}
+.cta .btn-primary{min-height:48px;border-radius:10px;font-size:14px}
+.note{font-size:12px;line-height:1.6;max-width:64ch;color:var(--ink-soft)}
+.row,.folder-head{padding:16px 18px;gap:15px}
+.row-name{font-size:14px}.row-meta,.folder-meta{font-size:11px;line-height:1.6}
+.icon-btn{width:auto;min-width:44px;min-height:44px;height:auto;padding:10px;display:inline-flex;align-items:center;justify-content:center;gap:7px;text-decoration:none;border-color:transparent;color:var(--accent);font-size:12px;font-weight:600}
+.icon-btn .ic{width:17px;height:17px}
+.tile{width:42px;height:46px;background:var(--bg-sunken);font-size:10px}
+.folder-head .tile{height:42px}.folder-name{font-size:14px}
+.foot{font-size:11px;line-height:1.8}.foot span{display:block;color:var(--ink-soft)}
+@media(max-width:480px){.cta{padding:17px}.cta .btn-primary{width:100%}.row,.folder-head{padding:13px 12px;gap:10px}.dl-label{display:none}.tile{width:36px;height:42px}.row-name{font-size:13px}.note{font-size:11px}.icon-btn{padding:10px}.eyebrow{margin-top:27px}}

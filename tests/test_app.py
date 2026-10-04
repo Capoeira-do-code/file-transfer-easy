@@ -650,17 +650,16 @@ class FileTransferEasyTests(unittest.TestCase):
         self.assertNotIn("class FileTransferApp", source)
 
     def test_dependency_bootstrap_success_returns_true_without_error_notice(self) -> None:
-        with mock.patch("app.missing_runtime_modules", return_value=["PySide6"]):
+        with mock.patch("app.sys.prefix", "test-venv"), mock.patch("app.missing_runtime_modules", return_value=["PySide6"]):
             with mock.patch("app.install_python_dependencies") as installer:
                 with mock.patch("app.import_web_dependencies", return_value=True):
                     with mock.patch("app.show_native_notice") as notice:
                         self.assertTrue(app.run_dependency_bootstrap_if_needed())
         installer.assert_called_once()
-        notice.assert_called_once()
-        self.assertFalse(notice.call_args.kwargs.get("error", False))
+        notice.assert_not_called()
 
     def test_dependency_bootstrap_failure_returns_false_and_shows_error(self) -> None:
-        with mock.patch("app.missing_runtime_modules", return_value=["PySide6"]):
+        with mock.patch("app.sys.prefix", "test-venv"), mock.patch("app.missing_runtime_modules", return_value=["PySide6"]):
             with mock.patch(
                 "app.install_python_dependencies",
                 side_effect=RuntimeError("fallo de instalacion"),

@@ -2,20 +2,20 @@
 
 Envía archivos entre dispositivos que no están en la misma red.
 
-App de escritorio para macOS y Windows. Arrastras un archivo o una carpeta a la
+App de escritorio para macOS, Linux y Windows. Arrastras un archivo o una carpeta a la
 ventana, la app genera un enlace público, y ves en vivo quién lo abre y qué se
 está descargando. Se queda en la bandeja del sistema, así que puedes cerrar la
 ventana y seguir compartiendo.
 
 Reescritura en Go de la app original en Python/PySide6, que sigue en la raíz del
-repositorio. Un único binario sin dependencias de runtime.
+repositorio. Un ejecutable con webview del sistema; Linux requiere GTK3 y WebKitGTK 4.1.
 
 ---
 
 ## Cómo funciona
 
 - **Ventana**: [Wails v3](https://wails.io) muestra una webview nativa
-  (WKWebView en macOS, WebView2 en Windows).
+  (WKWebView en macOS, WebKitGTK en Linux, WebView2 en Windows).
 - **Interfaz**: HTML, CSS y JavaScript planos. Sin npm, sin frameworks, sin CDN.
 - **Enlace público**: un túnel rápido de Cloudflare mediante `cloudflared`, que
   la app descarga sola la primera vez que compartes algo.
@@ -52,7 +52,7 @@ sondeo no sea lo que envenene la caché del sistema del usuario.
 
 ## Compilar
 
-Necesitas Go 1.24 o superior. En macOS, las Command Line Tools de Xcode.
+Necesitas la versión de Go indicada en `go.mod` (actualmente Go 1.27). En macOS, las Command Line Tools de Xcode.
 
 ```bash
 cd go-app
@@ -62,6 +62,12 @@ cd go-app
 
 # Solo tu arquitectura: la mitad de tiempo, ideal mientras desarrollas
 ARCH=arm64 ./scripts/build-macos.sh
+
+# Linux: .deb y .tar.gz para la arquitectura de la máquina
+./scripts/build-linux.sh
+
+# Linux AMD64 + ARM64 desde macOS (Zig y SDK de Debian)
+python3 scripts/build-linux-cross.py
 
 # Windows: .exe, también desde macOS o Linux
 ./scripts/build-windows.sh
@@ -74,11 +80,11 @@ El `.exe` no necesita cgo ni una máquina Windows: Wails v3 habla con WebView2
 mediante bindings en Go puro. El instalador NSIS sí hay que construirlo en
 Windows, con `scripts\build-windows.ps1`.
 
-Para publicar una release con ambos artefactos, empuja un tag y deja que actúe
+Para publicar una release con los artefactos de las tres plataformas, empuja un tag y deja que actúe
 [el workflow](../.github/workflows/build.yml):
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
 ### Desarrollo
@@ -87,6 +93,8 @@ git tag v1.0.0 && git push origin v1.0.0
 go run .                       # arranca la app
 go test ./internal/...         # pruebas
 go test -race ./internal/...   # con detector de carreras
+swift scripts/test-ui.swift    # arranque, estados y controles de la UI (macOS)
+./scripts/test-native-macos.sh # receptor AppKit de archivos y menú (macOS)
 go run ./cmd/genicons          # regenera todos los iconos
 ```
 
@@ -98,15 +106,17 @@ El token va inyectado en la propia página.
 
 ## Añadir archivos con la ventana oculta
 
-- **macOS**: suelta archivos sobre el **icono del Dock**. El paquete declara
-  `CFBundleDocumentTypes`, así que el Dock acepta cualquier archivo o carpeta y
-  la app los añade al momento.
+- **macOS**: suelta archivos o carpetas sobre el **icono del Dock** o el de la
+  **barra de menús**. Se añaden a la sesión y se abre la ventana. La barra usa
+  un receptor nativo AppKit; el Dock usa `CFBundleDocumentTypes`.
 - **Windows**: suelta archivos sobre el `.exe` o sobre un acceso directo. Se
   lanza una segunda instancia cuyos argumentos se reenvían a la que ya corre.
+- **Linux**: usa «Abrir con File Transfer Easy» desde el gestor de archivos.
+  Los argumentos se añaden tanto al iniciar como en una sesión existente.
 - **Desde la bandeja**: el menú tiene "Añadir archivos…" y "Añadir carpeta…".
 
-Soltar directamente sobre el icono de la barra de menús no es posible: ni Wails
-ni las plataformas exponen ese punto de entrada.
+El arrastre sobre el icono superior se implementa en macOS. La bandeja de Linux
+depende del escritorio; si no aparece, abre la app de nuevo desde el lanzador.
 
 ## Estructura
 
@@ -143,11 +153,32 @@ FTE_E2E=1 go test ./internal/app/ -run EndToEnd -v -timeout 5m
 
 ## Notas de distribución
 
-- El `.app` va firmado de forma **ad-hoc**, no con un Developer ID de Apple. La
-  primera vez hay que abrirlo con clic derecho › Abrir. Para distribuirlo de
-  verdad hace falta una cuenta de desarrollador y notarización.
+- El `.app` va firmado de forma **ad-hoc**, no con un Developer ID de Apple. Gatekeeper puede bloquearlo en otros equipos. Para distribución pública hace
+  falta Developer ID y notarización. Consulta [la guía de macOS](MACOS_RELEASE.md).
 - En Windows hace falta el runtime de **WebView2**, ya presente en Windows 11 y
   en Windows 10 actualizado.
 - `cloudflared` no se empaqueta: la app lo descarga de la release oficial de
   Cloudflare la primera vez, y lo guarda en el directorio de configuración del
   usuario.
+
+## Entrega macOS y Linux 1.0.1
+
+El build genera `dist/File Transfer Easy.app`, `dist/FileTransferEasy-1.0.1.dmg`
+y `dist/FileTransferEasy-1.0.1.dmg.sha256`. Compatible desde macOS 13, universal
+Apple Silicon + Intel. El script comprueba ambas arquitecturas, el plist, la
+firma ad hoc y la integridad del DMG antes de entregar los artefactos.
+
+La interfaz usa tipografía del sistema, tema claro/oscuro automático y assets
+locales. Añadir contenido crea el enlace automáticamente. Puedes cancelar la
+preparación, reintentar y seguir usando el enlace LAN si falla la conexión
+pública. El enlace público solo se puede copiar cuando su DNS está verificado y
+el túnel sigue activo. Los atajos son ⌘O (archivos) y ⇧⌘O (carpetas) en macOS.
+
+Los archivos y la actividad pertenecen a la sesión actual: no se restauran al
+salir. Quitar un archivo de la lista no lo borra del disco. Mantén el equipo
+encendido y la app abierta mientras compartes; cerrar la ventana la deja en la
+barra de menús, y «Salir» detiene la sesión.
+
+Linux incluye paquetes `.deb` y `.tar.gz` para AMD64 y ARM64. Instalación,
+dependencias y compilación: [LINUX_RELEASE.md](LINUX_RELEASE.md). Los controles
+realizados y pendientes están en [VALIDATION.md](VALIDATION.md).

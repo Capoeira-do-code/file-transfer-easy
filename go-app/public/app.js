@@ -170,6 +170,7 @@
     a.setAttribute("aria-label", "Descargar " + name);
     a.appendChild(icon("download", "ic ic-dl"));
     a.appendChild(icon("check", "ic ic-ok"));
+    a.appendChild(el("span", "dl-label", "Descargar"));
     li.appendChild(a);
 
     return li;
@@ -304,15 +305,14 @@
   }
 
   function renderEmpty() {
-    summaryEl.textContent = "Sin archivos por ahora";
+    summaryEl.textContent = "Sin archivos";
     ctaEl.setAttribute("hidden", "");
 
     var p = panel({
       icon: "inbox",
       accent: true,
-      title: "Todavía no hay archivos aquí",
-      text: "Quien comparte este enlace aún no ha añadido nada, o acaba de retirarlo. " +
-        "Puede añadir archivos en cualquier momento."
+      title: "Sin archivos",
+      text: "El remitente no está compartiendo archivos."
     });
     var live = el("span", "live");
     live.appendChild(el("span", "live-dot"));
@@ -336,9 +336,8 @@
     setStage(panel({
       icon: "clock",
       extra: "panel-expired",
-      title: "Este enlace ya no está disponible",
-      text: "Quien te lo envió ha dejado de compartir estos archivos. " +
-        "Pídele un enlace nuevo si todavía los necesitas."
+      title: "Enlace no disponible",
+      text: "El remitente ha dejado de compartir. Solicita un enlace nuevo."
     }));
     setBusy(false);
     showHint(false);
@@ -347,7 +346,7 @@
   }
 
   function renderError() {
-    summaryEl.textContent = "No hemos podido cargar la lista";
+    summaryEl.textContent = "No se pudo cargar la lista";
     ctaEl.setAttribute("hidden", "");
 
     var p = panel({
@@ -407,7 +406,7 @@
       credentials: "same-origin",
       headers: { "Accept": "application/json" }
     }).then(function (res) {
-      if (res.status === 410) {
+      if (res.status === 410 || res.status === 404) {
         renderExpired();
         return null;
       }

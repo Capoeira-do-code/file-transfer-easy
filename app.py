@@ -40,6 +40,7 @@ DEFAULT_UPLOAD_DIR = Path.home() / "Downloads" / "File Transfer Easy Uploads"
 DEFAULT_PORT_CANDIDATES = [80, 8080, 8000, 5000]
 TAILSCALE_PUBLIC_PORTS = ["443", "8443", "10000"]
 REQUIRED_MODULES = {"flask": "Flask", "waitress": "waitress", "PySide6": "PySide6"}
+RUNTIME_REQUIREMENTS = ("Flask>=3.0,<4.0", "waitress>=3.0,<4.0", "PySide6>=6.10,<7.0")
 INSTALL_CLOUDFLARED_COMMAND = (
     "winget install --id Cloudflare.cloudflared "
     "--accept-package-agreements --accept-source-agreements"
@@ -679,12 +680,12 @@ def preferences_without_secrets(preferences: dict) -> dict:
     return safe
 
 
-def install_python_dependencies(log: Callable[[str], None] | None = None) -> None:
-    requirements = Path(__file__).resolve().parent / "requirements.txt"
-    command = [sys.executable, "-m", "pip", "install", "-r", str(requirements)]
-    if log:
-        log("Instalando dependencias Python faltantes...")
-        log(" ".join(command))
+def dependency_log(message: str) -> None:
+    if sys.stdout is not None:
+        print(message, flush=True)
+
+
+def run_dependency_command(command: list[str], failure: str, log: Callable[[str], None]) -> None:
     completed = subprocess.run(
         command,
         stdout=subprocess.PIPE,
@@ -693,11 +694,80 @@ def install_python_dependencies(log: Callable[[str], None] | None = None) -> Non
         encoding="utf-8",
         errors="replace",
     )
-    if log and completed.stdout:
+    if completed.stdout:
         for line in completed.stdout.splitlines():
             log(line)
     if completed.returncode != 0:
-        raise RuntimeError("No se pudieron instalar las dependencias Python.")
+        detail = (completed.stdout or "").strip()[-4000:] or f"Código de salida: {completed.returncode}"
+        raise RuntimeError(f"{failure}\n{detail}")
+
+
+def prepare_python_environment(log: Callable[[str], None]) -> Path:
+    """Create/reuse a per-user environment, leaving system Python untouched."""
+    tag = f"{sys.version_info.major}.{sys.version_info.minor}-{sys.platform}-{platform.machine()}"
+    environment = APP_DIR / "python" / tag
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if not python.is_file():
+        log("Preparando el entorno Python...")
+        try:
+            run_dependency_command(
+                [sys.executable, "-m", "venv", str(environment)],
+                "No se pudo crear el entorno Python.",
+                log,
+            )
+        except RuntimeError as creation_error:
+            # Some Linux installations omit ensurepip. A base pip can provision
+            # a pip-free venv with --python, without installing system packages.
+            if importlib.util.find_spec("pip") is None:
+                raise
+            try:
+                run_dependency_command(
+                    [sys.executable, "-m", "venv", "--without-pip", str(environment)],
+                    "No se pudo crear el entorno Python.",
+                    log,
+                )
+                run_dependency_command(
+                    [sys.executable, "-m", "pip", "--python", str(python), "install", "--no-input", "pip"],
+                    "No se pudo preparar pip en el entorno Python.",
+                    log,
+                )
+            except RuntimeError as fallback_error:
+                raise RuntimeError(f"{creation_error}\n\n{fallback_error}") from fallback_error
+    return python
+
+
+def install_python_dependencies(log: Callable[[str], None] | None = None) -> None:
+    if getattr(sys, "frozen", False):
+        raise RuntimeError("El ejecutable empaquetado debe incluir las dependencias. Reinstala la app.")
+    log = log or dependency_log
+    if importlib.util.find_spec("pip") is None:
+        log("Preparando pip...")
+        try:
+            run_dependency_command(
+                [sys.executable, "-m", "ensurepip", "--upgrade"],
+                "No se pudo preparar pip. Usa una instalación completa de Python con venv.",
+                log,
+            )
+        except RuntimeError as ensure_error:
+            base_python = getattr(sys, "_base_executable", None)
+            if not base_python or base_python == sys.executable:
+                raise
+            try:
+                run_dependency_command(
+                    [base_python, "-m", "pip", "--python", sys.executable, "install", "--no-input", "pip"],
+                    "No se pudo preparar pip desde el Python base.",
+                    log,
+                )
+            except RuntimeError as fallback_error:
+                raise RuntimeError(f"{ensure_error}\n\n{fallback_error}") from fallback_error
+    requirements = Path(__file__).resolve().parent / "requirements.txt"
+    command = [sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check"]
+    if requirements.is_file():
+        command.extend(["-r", str(requirements)])
+    else:
+        command.extend(RUNTIME_REQUIREMENTS)
+    log("Instalando dependencias Python...")
+    run_dependency_command(command, "No se pudieron instalar las dependencias Python.", log)
     importlib.invalidate_caches()
     if not import_web_dependencies():
         raise RuntimeError("Las dependencias se instalaron, pero no se pudieron importar.")
@@ -741,10 +811,18 @@ def show_native_notice(title: str, message: str, error: bool = False) -> None:
 
 def run_dependency_bootstrap_if_needed() -> bool:
     missing = missing_runtime_modules()
-    if not missing:
-        return import_web_dependencies()
+    if not missing and import_web_dependencies():
+        return True
 
     try:
+        if getattr(sys, "frozen", False):
+            raise RuntimeError("Faltan dependencias en el ejecutable empaquetado. Reinstala la app.")
+        if sys.prefix == sys.base_prefix:
+            python = prepare_python_environment(dependency_log)
+            # Do not resolve this path: resolving the venv's Python symlink
+            # would bypass pyvenv.cfg and restart in the base environment.
+            os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+            return False  # execv replaces this process; never continue on base Python.
         install_python_dependencies()
     except Exception as exc:
         show_native_notice(
@@ -752,11 +830,8 @@ def run_dependency_bootstrap_if_needed() -> bool:
             (
                 "No se pudieron instalar las dependencias automáticamente.\n\n"
                 f"Detalle: {exc}\n\n"
-                + (
-                    "Ejecuta: python3 -m pip install -r requirements.txt"
-                    if sys.platform == "darwin"
-                    else "Ejecuta iniciar.bat o instala requirements.txt manualmente."
-                )
+                "Comprueba la conexión y vuelve a ejecutar app.py. "
+                "En Linux, el módulo venv puede requerir el paquete python3-venv."
             ),
             error=True,
         )
@@ -770,11 +845,7 @@ def run_dependency_bootstrap_if_needed() -> bool:
         )
         return False
 
-    show_native_notice(
-        APP_NAME,
-        "Dependencias instaladas correctamente. Iniciando la app.",
-        error=False,
-    )
+    dependency_log("Dependencias instaladas.")
     return True
 
 

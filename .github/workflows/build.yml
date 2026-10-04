@@ -1,7 +1,7 @@
 name: Build desktop app
 
 # Push a tag to cut a release:
-#   git tag v1.0.0 && git push origin v1.0.0
+#   git tag v1.0.1 && git push origin v1.0.1
 #
 # Running the workflow by hand just produces downloadable artifacts.
 on:
@@ -47,7 +47,23 @@ jobs:
 
       - name: Determinar la versión
         id: version
-        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          version=1.0.1
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Comprobar la interfaz en JavaScriptCore
+        run: swift scripts/test-ui.swift
+
+      - name: Comprobar recepción nativa de archivos en macOS
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+          CGO_CFLAGS: "-mmacosx-version-min=13.0"
+          CGO_LDFLAGS: "-mmacosx-version-min=13.0"
+        run: |
+          bash scripts/test-native-macos.sh
+          go run ./cmd/genicons
+          go test -race .
 
       - name: Construir el paquete y el .dmg
         env:
@@ -59,7 +75,71 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: go-app/dist/*.dmg
+          path: |
+            go-app/dist/*.dmg
+            go-app/dist/*.sha256
+          if-no-files-found: error
+
+  linux:
+    name: Linux (${{ matrix.arch }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-app/go.mod
+          cache-dependency-path: go-app/go.sum
+
+      - name: Instalar dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config python3 libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev xdg-utils desktop-file-utils xvfb dbus-x11
+
+      - name: Determinar la versión
+        id: version
+        run: |
+          version=1.0.1
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Construir paquetes Linux
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-linux.sh
+
+      - name: Comprobar argumentos de apertura
+        run: go test -race -tags gtk3 .
+
+      - name: Validar e instalar el paquete
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          cd dist
+          sha256sum -c "FileTransferEasy-$VERSION-linux-$ARCH.deb.sha256"
+          sha256sum -c "FileTransferEasy-$VERSION-linux-$ARCH.tar.gz.sha256"
+          dpkg-deb --info "FileTransferEasy-$VERSION-linux-$ARCH.deb"
+          sudo apt-get install -y "./FileTransferEasy-$VERSION-linux-$ARCH.deb"
+          desktop-file-validate /usr/share/applications/org.wails.file_transfer_easy.desktop
+          xvfb-run -a dbus-run-session -- python3 ../scripts/test-linux-launch.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            go-app/dist/*-linux-*.deb
+            go-app/dist/*-linux-*.tar.gz
+            go-app/dist/*-linux-*.sha256
           if-no-files-found: error
 
   windows:
@@ -76,7 +156,10 @@ jobs:
       - name: Determinar la versión
         id: version
         shell: bash
-        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          version=1.0.1
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
 
       - name: Instalar NSIS
         run: choco install nsis --no-progress -y
@@ -100,7 +183,7 @@ jobs:
 
   release:
     name: Publicar la release
-    needs: [macos, windows]
+    needs: [macos, windows, linux]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -118,12 +201,17 @@ jobs:
             ## Instalación
 
             **macOS** — abre el `.dmg` y arrastra la app a Aplicaciones. La
-            primera vez ábrela con clic derecho › Abrir, porque el paquete no
-            está firmado con un Developer ID de Apple.
+            entrega usa firma ad hoc y Gatekeeper puede bloquearla en otros equipos.
+            La distribución pública requiere Developer ID y notarización.
 
             **Windows** — usa el instalador, o el `.exe` portable si prefieres
             no instalar nada. Necesita el runtime de WebView2, que ya viene con
             Windows 11 y con Windows 10 actualizado.
+
+            **Linux** — en Debian 12 o Ubuntu 24.04 y posteriores, instala el
+            `.deb` de tu arquitectura con `sudo apt install ./archivo.deb`.
+            El `.tar.gz` incluye un instalador por usuario. Requiere GTK3 y
+            WebKitGTK 4.1; la bandeja depende del entorno de escritorio.
 
             La primera vez que compartas algo, la app descarga `cloudflared`
             automáticamente.

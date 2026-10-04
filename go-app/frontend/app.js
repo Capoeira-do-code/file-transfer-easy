@@ -214,12 +214,18 @@
     E.statusText = $('#status-text');
     E.since = $('#share-since');
     E.urlText = $('#url-text');
+    E.urlHint = $('#url-hint');
+    E.linkTitle = $('#link-title');
+    E.linkDescription = $('#link-description');
     E.urlSkeleton = $('#url-skeleton');
     E.btnCopy = $('#btn-copy');
     E.copyLabel = $('#copy-label');
     E.lanLine = $('#lan-line');
+    E.linkFoot = $('#link-foot');
     E.lanUrl = $('#lan-url');
     E.btnToggle = $('#btn-share-toggle');
+    E.btnOpen = $('#btn-open');
+    E.btnPreview = $('#btn-preview');
     E.shareError = $('#share-error');
     E.shareErrorText = $('#share-error-text');
     E.qrWrap = $('#qr-wrap');
@@ -260,10 +266,11 @@
   };
   var FALLBACK_STATUS = {
     idle: 'Listo', preparing: 'Preparando…', installing: 'Instalando cloudflared…',
-    starting: 'Iniciando túnel…', live: 'Compartiendo', stopping: 'Deteniendo…',
+    starting: 'Preparando enlace…', live: 'Compartiendo', stopping: 'Deteniendo…',
     stopped: 'Detenido', error: 'Error'
   };
   var BUSY_SHARE = { preparing: 1, installing: 1, starting: 1, live: 1, stopping: 1 };
+  var shareActionBusy = false;
 
   var copyTimer = null, copiedUntil = 0;
 
@@ -271,6 +278,9 @@
     var status = String(share.status || 'idle');
     var tone = TONE[status] || 'neutral';
     var live = status === 'live' && !!share.url;
+    var preparing = status === 'preparing' || status === 'installing' || status === 'starting';
+    E.btnOpen.disabled = !live;
+    E.btnPreview.disabled = !live && !share.lanUrl;
 
     if (E.statusPill.className !== 'statuspill is-' + tone) {
       E.statusPill.className = 'statuspill is-' + tone;
@@ -280,7 +290,11 @@
 
     /* url or skeleton */
     show(E.urlText, live);
-    show(E.urlSkeleton, !live);
+    show(E.urlSkeleton, preparing);
+    show(E.urlHint, !live && !preparing);
+    txt(E.urlHint, status === 'error' ? 'Enlace público no disponible' : status === 'stopping' ? 'Cerrando la sesión…' : 'Pulsa «Compartir» para crear un enlace nuevo');
+    txt(E.linkTitle, live ? 'Enlace público' : preparing ? 'Preparando enlace' : status === 'error' ? 'Error de conexión' : status === 'stopping' ? 'Deteniendo' : 'Enlace desactivado');
+    txt(E.linkDescription, live ? 'Quien tenga el enlace puede descargar estos archivos.' : status === 'installing' ? 'Descargando el componente de conexión.' : preparing ? 'Comprobando la conexión.' : status === 'error' ? (share.lanUrl ? 'Reintenta o utiliza el enlace de la red local.' : 'Reintenta la conexión.') : 'Pulsa «Compartir» para activar el enlace.');
     txt(E.urlText, live ? share.url : '');
     attr(E.urlText, 'title', live ? share.url : null);
 
@@ -296,6 +310,7 @@
     /* lan url */
     var lan = share.lanUrl || '';
     show(E.lanLine, !!lan);
+    show(E.linkFoot, !!lan);
     txt(E.lanUrl, lan);
     attr(E.lanLine, 'title', lan || null);
 
@@ -305,10 +320,12 @@
     txt(E.shareErrorText, err);
 
     /* toggle */
-    var sharing = !!BUSY_SHARE[status];
-    txt($('.btn-label', E.btnToggle), sharing ? 'Dejar de compartir' : 'Compartir');
+    var sharing = !!BUSY_SHARE[status] || (status === 'error' && !!lan);
+    txt($('.btn-label', E.btnToggle), preparing ? 'Cancelar' : sharing ? 'Dejar de compartir' : 'Compartir');
     E.btnToggle.dataset.mode = sharing ? 'stop' : 'start';
-    attr(E.btnToggle, 'aria-label', sharing ? 'Dejar de compartir' : 'Empezar a compartir');
+    E.btnToggle.disabled = status === 'stopping' || shareActionBusy;
+    $('#btn-retry').disabled = shareActionBusy;
+    attr(E.btnToggle, 'aria-label', preparing ? 'Cancelar la preparación del enlace' : sharing ? 'Dejar de compartir' : 'Empezar a compartir');
 
     updateQR(live ? share.url : '');
   }
@@ -316,7 +333,7 @@
   function paintCopy() {
     var copied = Date.now() < copiedUntil;
     cls(E.btnCopy, 'is-copied', copied);
-    txt(E.copyLabel, copied ? '¡Copiado!' : 'Copiar');
+    txt(E.copyLabel, copied ? 'Copiado' : 'Copiar enlace');
     attr(E.btnCopy, 'aria-label', copied ? 'Enlace copiado' : 'Copiar el enlace público');
   }
 
@@ -400,7 +417,7 @@
 
     var reveal = el('button', 'iconbtn iconbtn-sm');
     reveal.type = 'button';
-    reveal.setAttribute('aria-label', 'Mostrar en el explorador de archivos');
+    reveal.setAttribute('aria-label', /Mac/i.test(navigator.userAgent || '') ? 'Mostrar en Finder' : 'Mostrar en el explorador de archivos');
     reveal.title = 'Mostrar en el explorador de archivos';
     reveal.appendChild(icon('reveal'));
     reveal.addEventListener('click', function () {
@@ -480,6 +497,9 @@
     top.appendChild(cancel);
 
     var bar = el('div', 'bar');
+    bar.setAttribute('role', 'progressbar');
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
     var fill = el('div', 'bar-fill');
     bar.appendChild(fill);
 
@@ -493,7 +513,7 @@
     li.appendChild(bar);
     li.appendChild(meta);
 
-    li.__refs = { name: name, ip: ip, pct: pct, fill: fill, state: state, rest: rest, cancel: cancel };
+    li.__refs = { name: name, ip: ip, pct: pct, bar: bar, fill: fill, state: state, rest: rest, cancel: cancel };
     return li;
   }
 
@@ -507,7 +527,10 @@
     txt(r.ip, d.ip || '');
 
     var p = Math.max(0, Math.min(100, Number(d.percent) || 0));
-    txt(r.pct, Math.round(p) + '%');
+    txt(r.pct, active && !d.total ? 'ZIP' : Math.round(p) + '%');
+    attr(r.bar, 'aria-label', 'Descarga de ' + (d.name || 'archivo'));
+    attr(r.bar, 'aria-valuenow', active && !d.total ? null : String(Math.round(status === 'done' ? 100 : p)));
+    cls(r.bar, 'is-indeterminate', active && !d.total);
 
     var w = (status === 'done' ? 100 : p).toFixed(1) + '%';
     if (r.fill.style.width !== w) r.fill.style.width = w;
@@ -659,6 +682,7 @@
     var log = Array.isArray(s.log) ? s.log : [];
 
     var empty = items.length === 0;
+    renderShare(share);
     show(E.viewEmpty, empty);
     show(E.viewActive, !empty);
     if (empty) {
@@ -666,7 +690,6 @@
       return;
     }
 
-    renderShare(share);
     renderItems(items, totals);
     var activeCount = renderTransfers(transfers);
     renderVisitors(visitors);
@@ -721,6 +744,10 @@
   }
 
   function bind() {
+    var isMac = /Macintosh/.test(navigator.userAgent || '');
+    var dropHint = $('#drop-hint');
+    if (dropHint) txt(dropHint, isMac ? 'También puedes añadirlos desde el Dock o la barra de menús.' : 'El enlace se crea al añadir contenido.');
+    if (!isMac) txt($('#active-session-note'), 'Mantén el equipo encendido y la app abierta. Abre la app de nuevo para recuperar la ventana.');
     document.addEventListener('click', function (ev) {
       var b = ev.target.closest ? ev.target.closest('[data-act]') : null;
       if (b && b.dataset.act) runAdd(b.dataset.act);
@@ -734,9 +761,26 @@
     });
 
     E.btnToggle.addEventListener('click', function () {
+      if (shareActionBusy) return;
       var stop = E.btnToggle.dataset.mode === 'stop';
-      act(stop ? '/api/share/stop' : '/api/share/start');
+      // Startup requests may stay open while the tunnel is being prepared.
+      // Keep Cancel usable even while that request is pending.
+      if (stop) shareActionBusy = true;
+      E.btnToggle.disabled = stop;
+      act(stop ? '/api/share/stop' : '/api/share/start').then(function () {
+        shareActionBusy = false;
+        render();
+      });
     });
+
+    $('#btn-retry').addEventListener('click', function () {
+      if (shareActionBusy) return;
+      $('#btn-retry').disabled = true;
+      act('/api/share/start').then(function () { render(); });
+    });
+
+    E.btnOpen.addEventListener('click', function () { act('/api/share/open'); });
+    E.btnPreview.addEventListener('click', function () { act('/api/share/open'); });
 
     E.btnClear.addEventListener('click', function () {
       if (clearArmed) {
@@ -753,7 +797,6 @@
       if (clearArmed) setTimeout(disarmClear, 120);
     });
 
-    $('#btn-minimise').addEventListener('click', function () { post('/api/window/minimise'); });
     $('#btn-hide').addEventListener('click', function () { post('/api/window/hide'); });
 
     E.logbox.addEventListener('toggle', function () {
@@ -766,6 +809,12 @@
 
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape' && clearArmed) disarmClear();
+      var target = ev.target;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && String(ev.key).toLowerCase() === 'o') {
+        ev.preventDefault();
+        runAdd(ev.shiftKey ? 'add-folder' : 'add-files');
+      }
     });
   }
 

@@ -5,6 +5,7 @@ package tunnel
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -81,7 +82,10 @@ func downloadURL() (string, bool, error) {
 
 // Ensure returns a usable cloudflared path, downloading the official release
 // into binDir when it is not already installed.
-func Ensure(binDir string, log Logf) (string, error) {
+func Ensure(ctx context.Context, binDir string, log Logf) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if existing := Locate(binDir); existing != "" {
 		return existing, nil
 	}
@@ -97,13 +101,24 @@ func Ensure(binDir string, log Logf) (string, error) {
 		return "", fmt.Errorf("no se pudo crear %s: %w", binDir, err)
 	}
 	target := filepath.Join(binDir, binaryName)
+	// A cancelled or interrupted download must never look like an installed
+	// executable to the next attempt. Rename only after the file is complete.
+	file, err := os.CreateTemp(binDir, ".cloudflared-*")
+	if err != nil {
+		return "", err
+	}
+	temporary := file.Name()
+	file.Close()
+	defer os.Remove(temporary)
 
-	if err := download(url, target, isArchive); err != nil {
-		os.Remove(target)
+	if err := download(ctx, url, temporary, isArchive); err != nil {
 		return "", fmt.Errorf("no se pudo descargar cloudflared: %w", err)
 	}
-	if err := os.Chmod(target, 0o755); err != nil {
+	if err := os.Chmod(temporary, 0o755); err != nil {
 		return "", fmt.Errorf("no se pudo dar permisos a cloudflared: %w", err)
+	}
+	if err := os.Rename(temporary, target); err != nil {
+		return "", err
 	}
 	if log != nil {
 		log("info", "cloudflared instalado en "+target)
@@ -111,9 +126,13 @@ func Ensure(binDir string, log Logf) (string, error) {
 	return target, nil
 }
 
-func download(url, target string, isArchive bool) error {
+func download(ctx context.Context, url, target string, isArchive bool) error {
 	client := &http.Client{Timeout: downloadTimeout}
-	response, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(req)
 	if err != nil {
 		return err
 	}

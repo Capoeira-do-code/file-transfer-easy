@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
 	"os/exec"
@@ -22,16 +23,16 @@ const startTimeout = 45 * time.Second
 
 // session is one cloudflared process and the plumbing that watches it.
 type session struct {
-	cmd    *exec.Cmd
-	writer *io.PipeWriter
-	exited chan struct{}
+	cmd     *exec.Cmd
+	writer  *io.PipeWriter
+	exited  chan struct{}
+	stopped bool // guarded by Runner.mu; belongs to this process only
 }
 
 // Runner supervises one cloudflared process at a time.
 type Runner struct {
 	mu      sync.Mutex
 	current *session
-	stopped bool
 
 	binDir string
 	log    Logf
@@ -60,16 +61,16 @@ func (r *Runner) Running() bool {
 //
 // onExit is called from a background goroutine if the process dies on its own;
 // it is not called when the tunnel is stopped deliberately.
-func (r *Runner) Start(port int, onExit func(error)) (string, error) {
+func (r *Runner) Start(ctx context.Context, port int, onExit func(error)) (string, error) {
 	r.Stop()
 
-	binary, err := Ensure(r.binDir, r.log)
+	binary, err := Ensure(ctx, r.binDir, r.log)
 	if err != nil {
 		return "", err
 	}
 
 	localTarget := "http://127.0.0.1:" + strconv.Itoa(port)
-	cmd := exec.Command(binary, "tunnel", "--no-autoupdate", "--url", localTarget)
+	cmd := exec.CommandContext(ctx, binary, "tunnel", "--no-autoupdate", "--url", localTarget)
 	hideConsoleWindow(cmd)
 
 	// cloudflared splits its output across stdout and stderr, and prints the
@@ -87,7 +88,6 @@ func (r *Runner) Start(port int, onExit func(error)) (string, error) {
 	current := &session{cmd: cmd, writer: writer, exited: make(chan struct{})}
 	r.mu.Lock()
 	r.current = current
-	r.stopped = false
 	r.mu.Unlock()
 
 	urls := make(chan string, 1)
@@ -102,18 +102,22 @@ func (r *Runner) Start(port int, onExit func(error)) (string, error) {
 		close(current.exited)
 
 		r.mu.Lock()
-		deliberate := r.stopped
+		deliberate := current.stopped
 		if r.current == current {
 			r.current = nil
 		}
 		r.mu.Unlock()
 
-		if !deliberate && onExit != nil {
+		if !deliberate && ctx.Err() == nil && onExit != nil {
 			onExit(waitErr)
 		}
 	}()
 
 	select {
+	case <-ctx.Done():
+		r.Stop()
+		return "", ctx.Err()
+
 	case url := <-urls:
 		r.logf("info", "Túnel activo: %s", url)
 		return url, nil
@@ -166,7 +170,9 @@ func (r *Runner) Stop() {
 	r.mu.Lock()
 	current := r.current
 	r.current = nil
-	r.stopped = true
+	if current != nil {
+		current.stopped = true
+	}
 	r.mu.Unlock()
 
 	if current == nil || current.cmd.Process == nil {
