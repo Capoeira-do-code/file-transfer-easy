@@ -86,6 +86,20 @@ func (d *desktopBridge) PickFolder() (string, error) {
 	return dialog.PromptForSingleSelection()
 }
 
+// PickUploadFolder selects the local destination for incoming files.
+func (d *desktopBridge) PickUploadFolder() (string, error) {
+	wails, window := d.parts()
+	if wails == nil {
+		return "", nil
+	}
+	dialog := wails.Dialog.OpenFile().CanChooseFiles(false).CanChooseDirectories(true).
+		SetTitle("Dónde guardar los archivos recibidos")
+	if window != nil {
+		dialog.AttachToWindow(window)
+	}
+	return dialog.PromptForSingleSelection()
+}
+
 // SetClipboard copies text to the system clipboard.
 func (d *desktopBridge) SetClipboard(text string) bool {
 	wails, _ := d.parts()

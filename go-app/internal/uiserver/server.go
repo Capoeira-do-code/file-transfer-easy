@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"mime"
 	"net"
@@ -115,6 +116,7 @@ func New(core *app.App, assets fs.FS, token string) *Server {
 		core.HideWindow()
 		return nil
 	}))
+	s.registerSettingsRoutes(mux)
 
 	s.mux = mux
 	return s
@@ -148,6 +150,9 @@ func (s *Server) Close() {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if r.Body != nil && strings.HasPrefix(r.URL.Path, "/api/") {
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -209,9 +214,20 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentType := mime.TypeByExtension(path.Ext(name))
-	if contentType == "" {
-		contentType = "application/octet-stream"
+	// These are application assets, not user files. In particular, Windows
+	// file associations can override mime.TypeByExtension with a type that
+	// WebView2 refuses to execute or apply, preventing the UI from loading.
+	var contentType string
+	switch path.Ext(name) {
+	case ".js":
+		contentType = "text/javascript; charset=utf-8"
+	case ".css":
+		contentType = "text/css; charset=utf-8"
+	default:
+		contentType = mime.TypeByExtension(path.Ext(name))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Write(data)
@@ -301,8 +317,12 @@ func writeEvent(w http.ResponseWriter, payload []byte) {
 
 func decode(r *http.Request, target any) error {
 	defer r.Body.Close()
-	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("petición mal formada: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("la petición debe contener un único objeto JSON")
 	}
 	return nil
 }

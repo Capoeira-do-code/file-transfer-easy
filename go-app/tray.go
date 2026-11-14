@@ -15,6 +15,8 @@ func buildTray(wails *application.App, core *app.App, desktop *desktopBridge) {
 	if buildNativeTray(wails, core, desktop) {
 		return
 	}
+	// New starts the tray automatically when the application is running.
+	// Calling Run again would create another native icon and leak the first.
 	tray := wails.SystemTray.New()
 
 	if runtime.GOOS == "darwin" {
@@ -100,8 +102,6 @@ func buildTray(wails *application.App, core *app.App, desktop *desktopBridge) {
 		openPage: openPage,
 		stop:     stop,
 	})
-
-	tray.Run()
 }
 
 // trayHandles are the menu items the bridge keeps up to date.

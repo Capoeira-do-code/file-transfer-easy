@@ -38,6 +38,7 @@
   }
 
   var ICONS = {
+    lock: svg('<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'),
     download: svg('<path d="M12 3.7v10.5"/><path d="m7.9 10.1 4.1 4.1 4.1-4.1"/>' +
       '<path d="M4.8 16.4v1.8a2.1 2.1 0 0 0 2.1 2.1h10.2a2.1 2.1 0 0 0 2.1-2.1v-1.8"/>'),
     check: svg('<path d="m5.4 12.4 4.3 4.3 8.9-9"/>'),
@@ -163,10 +164,18 @@
     txt.appendChild(el("span", "row-flash", "Descarga iniciada"));
     li.appendChild(txt);
 
+    if (f.locked) {
+      var unlock = el('button', 'unlock-button', 'Desbloquear'); unlock.type = 'button';
+      unlock.setAttribute('aria-label', 'Desbloquear ' + name);
+      unlock.addEventListener('click', function () { openUnlock(f); });
+      li.appendChild(unlock); return li;
+    }
+    if (f.protected) txt.appendChild(el('span', 'locked-badge', 'Desbloqueado'));
     var a = el("a", "icon-btn");
     a.href = BASE + "/download/" + encodeURIComponent(f && f.id != null ? f.id : "");
     a.setAttribute("download", name);
     a.setAttribute("data-dl", "");
+    a.setAttribute("data-id", String(f.id));
     a.setAttribute("aria-label", "Descargar " + name);
     a.appendChild(icon("download", "ic ic-dl"));
     a.appendChild(icon("check", "ic ic-ok"));
@@ -275,7 +284,10 @@
 
     summaryEl.textContent = joinDot([filesText(count), totals.bytesText]);
 
-    if (count > 0) ctaEl.removeAttribute("hidden");
+    var available = (data.files || []).filter(function (file) { return !file.locked; }).length;
+    var label = zipLink.querySelector('span:last-child');
+    if (label) label.textContent = available < count ? 'Descargar disponibles (ZIP)' : 'Descargar todo (ZIP)';
+    if (available > 0) ctaEl.removeAttribute("hidden");
     else ctaEl.setAttribute("hidden", "");
 
     if (count === 0) {
@@ -312,7 +324,7 @@
       icon: "inbox",
       accent: true,
       title: "Sin archivos",
-      text: "El remitente no está compartiendo archivos."
+      text: publicOptions.uploadsEnabled ? "Puedes enviar archivos desde esta página." : "Todavía no hay archivos compartidos."
     });
     var live = el("span", "live");
     live.appendChild(el("span", "live-dot"));
@@ -345,15 +357,14 @@
     mode = "expired";
   }
 
-  function renderError() {
+  function renderError(message) {
     summaryEl.textContent = "No se pudo cargar la lista";
     ctaEl.setAttribute("hidden", "");
 
     var p = panel({
       icon: "retry",
       title: "No se ha podido conectar",
-      text: "Comprueba tu conexión. El equipo que comparte los archivos también " +
-        "puede estar apagado o sin red en este momento."
+      text: errorText(message || 'No se pudo conectar con el remitente. Comprueba tu conexión e inténtalo de nuevo.')
     });
 
     var btn = el("button", "btn btn-secondary");
@@ -394,52 +405,184 @@
     mode = "loading";
   }
 
+  var accessState = null, lastGate = '', publicOptions = {}, customError = '';
+  var unlockTarget = null, unlockReturnFocus = null, selectedUploads = [], uploadRequest = null;
+
+  function showMessage(message, error) {
+    var node = document.getElementById('action-message');
+    node.textContent = message || '';
+    node.hidden = !message;
+    node.classList.toggle('is-error', !!error);
+  }
+  function reason(data, fallback) { return data && (data.error || data.message) || fallback; }
+  function requestJSON(url, options) {
+    options = options || {}; options.credentials = 'same-origin'; options.cache = 'no-store';
+    return fetch(url, options).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (data) {
+        return { ok: response.ok, code: response.status, data: data };
+      });
+    });
+  }
+  function postJSON(url, data) {
+    return requestJSON(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data || {}) });
+  }
+  function applyPublicOptions(data) {
+    var options = data.settings || data;
+    var theme = options.theme || data.theme || 'light';
+    document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+    var title = options.pageTitle || data.title || 'Archivos compartidos';
+    document.getElementById('page-title').textContent = title;
+    document.title = title + ' · File Transfer Easy';
+    customError = options.errorMessage || '';
+    publicOptions.uploadsEnabled = options.uploadsEnabled === true || data.uploadsEnabled === true;
+    publicOptions.maxUploadMB = Number(options.maxUploadMB || data.maxUploadMB) || 100;
+    var section = document.getElementById('upload-section');
+    section.hidden = !(accessState && accessState.status === 'allowed' && publicOptions.uploadsEnabled);
+    document.getElementById('upload-limit').textContent = 'Máximo ' + publicOptions.maxUploadMB + ' MB por envío.';
+  }
+  function errorText(message) {
+    return customError && message.indexOf(customError) < 0 ? message + '\n' + customError : message;
+  }
+
+  function renderGate(data) {
+    accessState = data; applyPublicOptions(data);
+    ctaEl.hidden = true;
+    summaryEl.textContent = '';
+    if (uploadRequest) uploadRequest.abort();
+    var signature = [data.status, data.message, data.requestId].join('|');
+    if (lastGate === signature) return;
+    lastGate = signature; lastSignature = '';
+    var titles = { password: 'Acceso con contraseña', pending: 'Esperando autorización', denied: 'Acceso rechazado', blocked: 'Acceso bloqueado' };
+    var defaults = { password: 'Introduce la contraseña de esta página.', pending: 'Tu solicitud se ha enviado. La página se abrirá cuando el remitente autorice el acceso.', denied: 'El remitente ha rechazado la solicitud.', blocked: 'El remitente ha bloqueado el acceso desde este dispositivo.' };
+    var gate = el('section', 'gate'); gate.appendChild(el('h2', '', titles[data.status] || 'Acceso no disponible'));
+    gate.appendChild(el('p', '', data.message || defaults[data.status] || 'No se ha autorizado el acceso.'));
+    if (data.status === 'password' || data.status === 'pending') {
+      var form = el('form'), password, name;
+      if (data.status === 'password') {
+        var passwordLabel = el('label', '', 'Contraseña'); password = el('input'); password.type = 'password'; password.autocomplete = 'current-password'; password.required = true; passwordLabel.appendChild(password); form.appendChild(passwordLabel);
+      }
+      var nameLabel = el('label', '', 'Tu nombre (opcional)'); name = el('input'); name.type = 'text'; name.autocomplete = 'nickname'; name.maxLength = 80; nameLabel.appendChild(name); form.appendChild(nameLabel);
+      var error = el('p', 'form-error'); error.hidden = true; error.setAttribute('role', 'alert'); form.appendChild(error);
+      var submit = el('button', 'btn btn-primary', data.status === 'password' ? 'Continuar' : 'Actualizar nombre'); submit.type = 'submit'; form.appendChild(submit);
+      form.addEventListener('submit', function (event) {
+        event.preventDefault(); submit.disabled = true; error.hidden = true;
+        var body = { name: name.value.trim() }; if (password) body.password = password.value;
+        postJSON(BASE + '/api/access', body).then(function (result) {
+          submit.disabled = false;
+          if (['allowed', 'password', 'pending', 'denied', 'blocked'].indexOf(result.data.status) < 0) { error.textContent = errorText(reason(result.data, 'No se pudo comprobar el acceso (HTTP ' + result.code + ').')); error.hidden = false; return; }
+          if (result.data.status === 'password') { error.textContent = errorText(reason(result.data, 'La contraseña no es correcta.')); error.hidden = false; return; }
+          if (result.data.status === 'allowed') { lastGate = ''; load(true); }
+          else { lastGate = ''; renderGate(result.data); }
+        }).catch(function () { submit.disabled = false; error.textContent = 'No se pudo conectar con el remitente.'; error.hidden = false; });
+      });
+      gate.appendChild(form);
+    } else {
+      var retry = el('button', 'btn btn-secondary', 'Comprobar acceso'); retry.type = 'button'; retry.addEventListener('click', function () { load(true); }); gate.appendChild(retry);
+    }
+    setStage(gate); setBusy(false); showHint(false); mode = data.status;
+  }
+
+  function openUnlock(file) {
+    unlockTarget = file; unlockReturnFocus = document.activeElement;
+    var dialog = document.getElementById('unlock-dialog');
+    document.getElementById('unlock-title').textContent = file.folder ? 'Desbloquear carpeta' : 'Desbloquear archivo';
+    document.getElementById('unlock-name').textContent = file.folder || file.name;
+    document.getElementById('unlock-password').value = '';
+    document.getElementById('unlock-error').hidden = true;
+    if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');
+    setTimeout(function () { document.getElementById('unlock-password').focus(); }, 0);
+  }
+  function closeUnlock() {
+    var dialog = document.getElementById('unlock-dialog');
+    if (dialog.close) dialog.close(); else dialog.removeAttribute('open');
+    if (unlockReturnFocus && unlockReturnFocus.focus) unlockReturnFocus.focus();
+  }
+  document.getElementById('unlock-cancel').addEventListener('click', closeUnlock);
+  document.getElementById('unlock-form').addEventListener('submit', function (event) {
+    event.preventDefault(); if (!unlockTarget) return;
+    var button = document.getElementById('unlock-submit'), error = document.getElementById('unlock-error');
+    button.disabled = true; error.hidden = true;
+    postJSON(BASE + '/api/unlock', { id: unlockTarget.id, password: document.getElementById('unlock-password').value }).then(function (result) {
+      button.disabled = false;
+      if (!result.ok || result.data.ok === false) { error.textContent = errorText(reason(result.data, 'No se pudo desbloquear el archivo (HTTP ' + result.code + ').')); error.hidden = false; return; }
+      closeUnlock(); load(true);
+    }).catch(function () { button.disabled = false; error.textContent = 'No se pudo conectar con el remitente.'; error.hidden = false; });
+  });
+
+  function paintUploads() {
+    var list = document.getElementById('upload-selection'); list.textContent = '';
+    selectedUploads.forEach(function (file) { var row = el('li'); row.appendChild(el('span', '', file.name)); row.appendChild(el('small', '', bytesText(file.size) || '0 B')); list.appendChild(row); });
+    document.getElementById('upload-actions').hidden = selectedUploads.length === 0 && !uploadRequest;
+    document.getElementById('upload-start').disabled = !!uploadRequest || selectedUploads.length === 0;
+    document.getElementById('upload-cancel').hidden = !uploadRequest;
+    document.getElementById('upload-files').disabled = !!uploadRequest;
+  }
+  document.getElementById('upload-files').addEventListener('change', function () {
+    selectedUploads = Array.prototype.slice.call(this.files || []);
+    document.getElementById('upload-status').textContent = ''; document.getElementById('upload-progress').hidden = true;
+    showMessage(''); paintUploads();
+  });
+  document.getElementById('upload-cancel').addEventListener('click', function () { if (uploadRequest) uploadRequest.abort(); });
+  document.getElementById('upload-start').addEventListener('click', function () {
+    if (uploadRequest || !selectedUploads.length) return;
+    var maximum = publicOptions.maxUploadMB * 1024 * 1024;
+    if (selectedUploads.length > 64) { showMessage('Selecciona como máximo 64 archivos por envío.', true); return; }
+    var total = selectedUploads.reduce(function (sum, file) { return sum + file.size; }, 0);
+    if (total > maximum) { showMessage('El envío supera el límite de ' + publicOptions.maxUploadMB + ' MB. Selecciona menos archivos.', true); return; }
+    var tooLarge = selectedUploads.filter(function (file) { return file.size > maximum; });
+    if (tooLarge.length) { showMessage('«' + tooLarge[0].name + '» supera el límite de ' + publicOptions.maxUploadMB + ' MB.', true); return; }
+    var payload = new FormData(); selectedUploads.forEach(function (file) { payload.append('files', file, file.name); });
+    var xhr = new XMLHttpRequest(), progress = document.getElementById('upload-progress'), status = document.getElementById('upload-status');
+    uploadRequest = xhr; progress.value = 0; progress.hidden = false; status.textContent = 'Enviando…'; showMessage(''); paintUploads();
+    xhr.open('POST', BASE + '/upload'); xhr.withCredentials = true;
+    xhr.upload.addEventListener('progress', function (event) { if (event.lengthComputable) { progress.value = Math.round(event.loaded / event.total * 100); status.textContent = 'Enviando… ' + progress.value + '%'; } });
+    function finish() { uploadRequest = null; paintUploads(); }
+    xhr.addEventListener('load', function () {
+      var data; try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+      if (xhr.status >= 200 && xhr.status < 300 && data.ok !== false) {
+        var count = data.files ? data.files.length : selectedUploads.length;
+        selectedUploads = []; document.getElementById('upload-files').value = ''; progress.value = 100; status.textContent = 'Envío completado'; finish(); showMessage(count + ' ' + plural(count, 'archivo enviado', 'archivos enviados')); load(true);
+      } else { finish(); status.textContent = 'No se completó el envío'; showMessage(errorText(reason(data, xhr.responseText || 'Error al enviar los archivos (HTTP ' + xhr.status + ').')), true); if (xhr.status === 401 || xhr.status === 403) load(true); }
+    });
+    xhr.addEventListener('error', function () { finish(); status.textContent = 'Envío interrumpido'; showMessage('La conexión se ha interrumpido durante la subida. Puedes reintentarlo.', true); });
+    xhr.addEventListener('abort', function () { finish(); status.textContent = 'Envío cancelado'; progress.hidden = true; });
+    xhr.send(payload);
+  });
+
+
   /* ------------------------------------------------------------- datos --- */
 
   function load(force) {
     if (stopped || inFlight) return;
     inFlight = true;
-
-    fetch(MANIFEST_URL, {
-      method: "GET",
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { "Accept": "application/json" }
-    }).then(function (res) {
-      if (res.status === 410 || res.status === 404) {
-        renderExpired();
-        return null;
-      }
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      return res.json();
-    }).then(function (data) {
-      if (data == null || stopped) return;
-      if (data.expired === true) {
-        renderExpired();
-        return;
-      }
-      showHint(false);
-
-      var sig = JSON.stringify(data);
-      if (!force && sig === lastSignature && (mode === "files" || mode === "empty")) return;
-      lastSignature = sig;
-      renderFiles(data);
-    }).catch(function () {
+    requestJSON(BASE + '/api/access').then(function (result) {
+      if (result.code === 410 || result.code === 404) { renderExpired(); return null; }
+      var data = result.data;
+      if (!data || ['allowed', 'password', 'pending', 'denied', 'blocked'].indexOf(data.status) < 0) throw new Error(reason(data, 'No se pudo comprobar el acceso (HTTP ' + result.code + ').'));
+      accessState = data; applyPublicOptions(data);
+      if (data.status !== 'allowed') { renderGate(data); return null; }
+      lastGate = '';
+      return requestJSON(MANIFEST_URL).then(function (manifestResult) {
+        if (manifestResult.code === 410 || manifestResult.code === 404 || manifestResult.data.expired) { renderExpired(); return; }
+        if (!manifestResult.ok) {
+          if (manifestResult.data.status) { renderGate(manifestResult.data); return; }
+          throw new Error(reason(manifestResult.data, 'No se pudo cargar la lista (HTTP ' + manifestResult.code + ').'));
+        }
+        var manifest = manifestResult.data;
+        applyPublicOptions(manifest); showHint(false);
+        var signature = JSON.stringify(manifest);
+        if (!force && signature === lastSignature && (mode === 'files' || mode === 'empty')) return;
+        lastSignature = signature; renderFiles(manifest);
+      });
+    }).catch(function (error) {
       if (stopped) return;
-      if (mode === "files" || mode === "empty") {
-        // Ya hay contenido en pantalla: no lo destruimos por un fallo puntual.
-        showHint(true);
-      } else if (mode !== "error") {
-        // Sólo pintamos el panel una vez: los reintentos no deben repetir el aviso.
-        renderError();
-      }
-    }).then(function () {
-      inFlight = false;
-    });
+      if (mode === 'files' || mode === 'empty') { showHint(true); showMessage(errorText(error.message), true); }
+      else renderError(error.message);
+    }).then(function () { inFlight = false; });
   }
 
   function ping() {
-    if (stopped) return;
+    if (stopped || !accessState || accessState.status !== 'allowed') return;
     fetch(PING_URL, {
       method: "POST",
       cache: "no-store",
@@ -490,17 +633,33 @@
     }, FLASH_MS);
   }
 
-  stage.addEventListener("click", function (ev) {
-    var target = ev.target;
-    if (!target || !target.closest) return;
-    var link = target.closest("a[data-dl]");
+  function beginDownload(link, checkURL, row) {
+    if (link.dataset.downloadBusy) return;
+    link.dataset.downloadBusy = 'true'; link.setAttribute('aria-busy', 'true'); showMessage('');
+    requestJSON(checkURL).then(function (result) {
+      if (!result.ok || result.data.ok === false) {
+        showMessage(errorText(reason(result.data, 'No se pudo iniciar la descarga (HTTP ' + result.code + ').')), true);
+        if (result.code === 401 || result.code === 403) load(true);
+        return;
+      }
+      // Keep the stream in the browser's download manager; large files never
+      // accumulate in a JavaScript Blob. The streaming endpoint validates again.
+      var download = el('a');
+      download.href = typeof result.data.url === 'string' && result.data.url.indexOf(BASE + '/') === 0 ? result.data.url : link.href;
+      download.setAttribute('download', link.getAttribute('download') || '');
+      download.hidden = true; document.body.appendChild(download); download.click(); document.body.removeChild(download);
+      if (row) flash(row);
+    }).catch(function (error) { showMessage('No se pudo comprobar la descarga' + (error.message ? ': ' + error.message : '.'), true); })
+      .then(function () { delete link.dataset.downloadBusy; link.removeAttribute('aria-busy'); });
+  }
+  stage.addEventListener('click', function (event) {
+    var link = event.target && event.target.closest ? event.target.closest('a[data-dl]') : null;
     if (!link) return;
-    flash(link.closest(".row"));
+    event.preventDefault();
+    beginDownload(link, BASE + '/api/download/' + encodeURIComponent(link.dataset.id), link.closest('.row'));
   });
-
-  zipLink.addEventListener("click", function () {
-    zipLink.classList.add("is-dl");
-    window.setTimeout(function () { zipLink.classList.remove("is-dl"); }, FLASH_MS);
+  zipLink.addEventListener('click', function (event) {
+    event.preventDefault(); beginDownload(zipLink, BASE + '/api/zip');
   });
 
   /* ------------------------------------------------------------ arranque --- */

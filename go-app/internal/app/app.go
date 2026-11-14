@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/access"
 	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/activity"
 	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/core"
 	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/publicweb"
@@ -60,6 +61,7 @@ type tunnelRunner interface {
 type App struct {
 	Store   *core.Store
 	Tracker *activity.Tracker
+	Access  *access.Manager
 
 	dataDir      string
 	native       Native
@@ -72,6 +74,7 @@ type App struct {
 	publicURL     string
 	lanURL        string
 	shareError    string
+	settingsError string
 	liveSince     time.Time
 	shareToken    string
 	publicPort    int
@@ -85,11 +88,12 @@ type App struct {
 	stopMu  sync.Mutex
 
 	// Broadcast plumbing for the SSE stream.
-	busMu    sync.Mutex
-	clients  map[chan []byte]struct{}
-	dirty    chan struct{}
-	shutdown chan struct{}
-	once     sync.Once
+	busMu            sync.Mutex
+	clients          map[chan []byte]struct{}
+	dirty            chan struct{}
+	shutdown         chan struct{}
+	once             sync.Once
+	notifiedRequests map[string]bool
 }
 
 // New builds the application core. dataDir is where cloudflared is cached, and
@@ -108,6 +112,14 @@ func New(dataDir string, native Native, publicAssets fs.FS) *App {
 
 	a.Store = core.NewStore(a.MarkDirty)
 	a.Tracker = activity.New(a.MarkDirty)
+	policy, err := access.New(dataDir, a.MarkDirty)
+	a.Access = policy
+	if err != nil {
+		a.Tracker.Logf("error", "No se pudo cargar la configuración: %s", err)
+		a.settingsError = "No se pudo cargar la configuración guardada. Revisa y guarda los ajustes antes de compartir: " + err.Error()
+		a.status, a.shareError = StatusError, a.settingsError
+	}
+	a.notifiedRequests = make(map[string]bool)
 	a.tunnel = tunnel.NewRunner(dataDir, a.Tracker.Logf)
 
 	go a.broadcastLoop()
@@ -202,6 +214,7 @@ func (a *App) broadcastLoop() {
 
 func (a *App) publish() {
 	state := a.Snapshot()
+	a.notifyAccessRequests(state.Requests)
 
 	if a.native != nil {
 		a.native.StateChanged(summaryOf(state))
@@ -284,7 +297,7 @@ func (a *App) RemoveItems(ids []string) error {
 	if a.Store.Remove(ids) == 0 {
 		return nil
 	}
-	if a.Store.IsEmpty() {
+	if a.Store.IsEmpty() && !a.Access.Settings().UploadsEnabled {
 		go a.StopShare()
 	}
 	return nil
@@ -293,7 +306,9 @@ func (a *App) RemoveItems(ids []string) error {
 // ClearItems removes everything and stops sharing.
 func (a *App) ClearItems() error {
 	a.Store.Clear()
-	go a.StopShare()
+	if !a.Access.Settings().UploadsEnabled {
+		go a.StopShare()
+	}
 	return nil
 }
 
@@ -345,9 +360,14 @@ func (a *App) StartShare() error {
 		a.mu.Unlock()
 		return nil
 	}
-	if a.Store.IsEmpty() {
+	if a.settingsError != "" {
+		err := errors.New(a.settingsError)
 		a.mu.Unlock()
-		return errors.New("añade algún archivo antes de compartir")
+		return err
+	}
+	if a.Store.IsEmpty() && !a.Access.Settings().UploadsEnabled {
+		a.mu.Unlock()
+		return errors.New("añade archivos o activa la recepción en Ajustes antes de crear un enlace")
 	}
 	if a.shareCancel != nil {
 		a.shareCancel()
@@ -583,7 +603,10 @@ func (a *App) startPublicServer(token string) (int, error) {
 		return 0, fmt.Errorf("no se pudo abrir un puerto local: %w", err)
 	}
 
-	handler := publicweb.New(a.publicAssets, a.Store, a.Tracker, token)
+	handler := publicweb.New(a.publicAssets, a.Store, a.Tracker, token, publicweb.Options{
+		Access:   a.Access,
+		OnUpload: a.ReceivePaths,
+	})
 	server := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 15 * time.Second,

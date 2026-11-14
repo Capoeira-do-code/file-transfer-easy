@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ const rescanInterval = 4 * time.Second
 // Entry is one concrete file a recipient can download.
 type Entry struct {
 	ID      string
+	OwnerID string // ID of the file/folder item whose access policy applies
 	Name    string // filename shown and used for the download
 	ZipPath string // path this entry takes inside the "download all" zip
 	Path    string // absolute path on disk
@@ -73,6 +75,7 @@ type Store struct {
 	mu       sync.RWMutex
 	items    []*Item
 	lastScan time.Time
+	excluded map[string]int
 
 	onChange func()
 }
@@ -80,7 +83,57 @@ type Store struct {
 // NewStore returns an empty store. onChange, if non-nil, is called after every
 // mutation so the caller can broadcast fresh state.
 func NewStore(onChange func()) *Store {
-	return &Store{onChange: onChange}
+	return &Store{onChange: onChange, excluded: make(map[string]int)}
+}
+
+func exclusionKey(path string) string {
+	key := filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		key = strings.ToLower(key)
+	}
+	return key
+}
+func (s *Store) excludedLocked(path string) bool { return s.excluded[exclusionKey(path)] > 0 }
+
+// ExcludePath prevents a receiving file from becoming public through either
+// direct file items or automatic rescans of a shared parent folder. The
+// release function is idempotent and must run after completion or rollback.
+func (s *Store) ExcludePath(path string) func() {
+	key := exclusionKey(path)
+	s.mu.Lock()
+	if s.excluded == nil {
+		s.excluded = make(map[string]int)
+	}
+	s.excluded[key]++
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			s.excluded[key]--
+			if s.excluded[key] <= 0 {
+				delete(s.excluded, key)
+			}
+			s.mu.Unlock()
+			s.notify()
+		})
+	}
+}
+
+func (s *Store) itemCopyLocked(item *Item) Item {
+	copied := *item
+	copied.entries = nil
+	if len(s.excluded) > 0 {
+		copied.Size = 0
+		copied.FileCount = 0
+		for _, entry := range item.entries {
+			if !s.excludedLocked(entry.Path) {
+				copied.Size += entry.Size
+				copied.FileCount++
+			}
+		}
+	}
+	return copied
 }
 
 func (s *Store) notify() {
@@ -181,6 +234,7 @@ func buildItem(abs string, info os.FileInfo) *Item {
 	item.FileCount = 1
 	item.entries = []Entry{{
 		ID:      hashID(abs),
+		OwnerID: item.ID,
 		Name:    info.Name(),
 		ZipPath: info.Name(),
 		Path:    abs,
@@ -229,6 +283,7 @@ func (it *Item) scanFolder() {
 		}
 		entries = append(entries, Entry{
 			ID:      hashID(path),
+			OwnerID: it.ID,
 			Name:    name,
 			ZipPath: filepath.ToSlash(filepath.Join(it.Name, rel)),
 			Path:    path,
@@ -356,8 +411,7 @@ func (s *Store) Items() []Item {
 	defer s.mu.RUnlock()
 	out := make([]Item, 0, len(s.items))
 	for _, item := range s.items {
-		copied := *item
-		copied.entries = nil
+		copied := s.itemCopyLocked(item)
 		out = append(out, copied)
 	}
 	return out
@@ -387,10 +441,18 @@ func (s *Store) Entries() []Entry {
 			continue
 		}
 		if item.Kind == KindFile {
-			loose = append(loose, item.entries...)
+			for _, entry := range item.entries {
+				if !s.excludedLocked(entry.Path) {
+					loose = append(loose, entry)
+				}
+			}
 			continue
 		}
-		grouped = append(grouped, item.entries...)
+		for _, entry := range item.entries {
+			if !s.excludedLocked(entry.Path) {
+				grouped = append(grouped, entry)
+			}
+		}
 	}
 	return append(loose, grouped...)
 }
@@ -404,7 +466,7 @@ func (s *Store) Entry(id string) (Entry, bool) {
 			continue
 		}
 		for _, entry := range item.entries {
-			if entry.ID == id {
+			if entry.ID == id && !s.excludedLocked(entry.Path) {
 				return entry, true
 			}
 		}
@@ -419,8 +481,7 @@ func (s *Store) Folders() []Item {
 	var out []Item
 	for _, item := range s.items {
 		if item.Kind == KindFolder && !item.Missing {
-			copied := *item
-			copied.entries = nil
+			copied := s.itemCopyLocked(item)
 			out = append(out, copied)
 		}
 	}
@@ -436,8 +497,12 @@ func (s *Store) Totals() Totals {
 		if item.Missing {
 			continue
 		}
-		totals.Files += item.FileCount
-		totals.Bytes += item.Size
+		for _, entry := range item.entries {
+			if !s.excludedLocked(entry.Path) {
+				totals.Files++
+				totals.Bytes += entry.Size
+			}
+		}
 	}
 	return totals
 }

@@ -11,17 +11,23 @@
 # macOS or Linux. This script exists for the NSIS installer, which does need
 # to run on Windows.
 
+[CmdletBinding()]
+param(
+    [string]$Version = "",
+    [switch]$SkipInstaller
+)
+
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath (Join-Path $PSScriptRoot "..")
 
-$Version = if ($env:VERSION) { $env:VERSION } else { "1.0.0" }
+if (-not $Version) { $Version = if ($env:VERSION) { $env:VERSION } else { (Get-Content -LiteralPath VERSION -Raw).Trim() } }
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version debe usar X.Y.Z." }
 $Dist = "dist"
-$Exe = Join-Path $Dist "FileTransferEasy.exe"
+$Exe = Join-Path $Dist "FileTransferEasy-$Version-windows-amd64.exe"
 
 function Say($message) { Write-Host "> $message" -ForegroundColor Cyan }
 
-if (Test-Path $Dist) { Remove-Item -Recurse -Force $Dist }
-New-Item -ItemType Directory -Path $Dist | Out-Null
+New-Item -ItemType Directory -Path $Dist -Force | Out-Null
 
 Say "Generando iconos..."
 go run ./cmd/genicons | Out-Null
@@ -30,21 +36,38 @@ if ($LASTEXITCODE -ne 0) { throw "No se pudieron generar los iconos." }
 # go-winres turns the .ico and the manifest into a .syso that `go build` picks
 # up automatically, which is what gives the .exe its icon and DPI awareness.
 Say "Incrustando icono y manifiesto..."
-go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --arch amd64 --product-version $Version --file-version $Version
-if ($LASTEXITCODE -ne 0) { throw "go-winres falló." }
+$resource = Join-Path (Get-Location).Path 'rsrc_windows_amd64.syso'
+$resourceBackup = $null
+if (Test-Path -LiteralPath $resource) {
+    $resourceBackup = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+    Copy-Item -LiteralPath $resource -Destination $resourceBackup
+}
+$previousCGO, $previousOS, $previousArch = $env:CGO_ENABLED, $env:GOOS, $env:GOARCH
+try {
+    go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --arch amd64 --product-version $Version --file-version $Version
+    if ($LASTEXITCODE -ne 0) { throw "go-winres falló." }
 
-Say "Compilando windows/amd64..."
-$env:CGO_ENABLED = "0"
-$env:GOOS = "windows"
-$env:GOARCH = "amd64"
-# -H windowsgui keeps a console window from appearing behind the app.
-go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$Version" -o $Exe .
-if ($LASTEXITCODE -ne 0) { throw "La compilación falló." }
+    Say "Compilando windows/amd64..."
+    $env:CGO_ENABLED = "0"
+    $env:GOOS = "windows"
+    $env:GOARCH = "amd64"
+    # -H windowsgui keeps a console window from appearing behind the app.
+    go build -tags production -trimpath -ldflags "-s -w -H windowsgui -X main.version=$Version" -o $Exe .
+    if ($LASTEXITCODE -ne 0) { throw "La compilación falló." }
+} finally {
+    $env:CGO_ENABLED, $env:GOOS, $env:GOARCH = $previousCGO, $previousOS, $previousArch
+    if ($resourceBackup) {
+        Move-Item -LiteralPath $resourceBackup -Destination $resource -Force
+    } elseif (Test-Path -LiteralPath $resource) {
+        Remove-Item -LiteralPath $resource -Force
+    }
+}
 
-# The .syso would otherwise get picked up by unrelated builds on this machine.
-Get-ChildItem -Filter "rsrc_windows_*.syso" | Remove-Item -Force -ErrorAction SilentlyContinue
+$hash = (Get-FileHash -LiteralPath $Exe -Algorithm SHA256).Hash.ToLowerInvariant()
+"$hash  $([IO.Path]::GetFileName($Exe))" | Set-Content -LiteralPath "$Exe.sha256" -Encoding ascii
 
 Say "Listo: $Exe"
+if ($SkipInstaller) { return }
 
 # ------------------------------------------------------------------ installer
 
@@ -55,7 +78,10 @@ if (-not $makensis) {
 }
 
 Say "Construyendo el instalador..."
-& $makensis.Source /DVERSION=$Version installer\windows.nsi
+& $makensis.Source "/DVERSION=$Version" "/DSOURCE_EXE=$((Resolve-Path -LiteralPath $Exe).Path)" installer\windows.nsi
 if ($LASTEXITCODE -ne 0) { throw "NSIS falló." }
 
-Say "Listo: $(Join-Path $Dist "FileTransferEasy-Setup-$Version.exe")"
+$installer = Join-Path $Dist "FileTransferEasy-Setup-$Version.exe"
+$hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+"$hash  $([IO.Path]::GetFileName($installer))" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+Say "Listo: $installer"

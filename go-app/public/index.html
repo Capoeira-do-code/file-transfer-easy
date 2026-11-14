@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="Archivos compartidos contigo con File Transfer Easy.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2217%22%20fill%3D%22%235850d9%22%2F%3E%3Cpath%20d%3D%22M32%2040V16m-10%2010%2010-10%2010%2010M13%2038v10a3%203%200%200%200%203%203h32a3%203%200%200%200%203-3V38%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
@@ -31,8 +31,7 @@
     </div>
 
     <div class="head-body" id="headBody">
-      <p class="eyebrow">DESCARGAS</p>
-      <h1 class="title">Archivos compartidos</h1>
+      <h1 class="title" id="page-title">Archivos compartidos</h1>
       <p class="summary" id="summary">Cargando los archivos…</p>
 
       <p class="hint" id="hint" role="status" hidden>
@@ -52,7 +51,7 @@
           </span>
           <span>Descargar todo (ZIP)</span>
         </a>
-        <p class="note">Mantén la pestaña abierta hasta que termine la descarga.</p>
+
       </div>
     </div>
   </header>
@@ -71,11 +70,17 @@
     <p class="sr-only">Cargando la lista de archivos.</p>
   </main>
 
-  <footer class="foot" id="foot">
-    <p>Los archivos se envían desde el equipo de quien los comparte.<br>El remitente debe mantener su equipo encendido y la app abierta.</p>
-  </footer>
+  <section id="upload-section" class="upload-section" aria-labelledby="upload-title" hidden>
+    <div class="upload-heading"><div><h2 id="upload-title">Enviar archivos</h2><p id="upload-limit"></p></div><label class="btn btn-secondary upload-pick">Elegir archivos<input type="file" id="upload-files" multiple></label></div>
+    <ul id="upload-selection" class="upload-selection"></ul>
+    <div class="upload-actions" id="upload-actions" hidden><button type="button" class="btn btn-primary" id="upload-start">Enviar</button><button type="button" class="btn btn-secondary" id="upload-cancel" hidden>Cancelar</button><span id="upload-status" role="status"></span></div>
+    <progress id="upload-progress" value="0" max="100" aria-label="Progreso de la subida" hidden></progress>
+  </section>
+  <p id="action-message" class="action-message" role="status" hidden></p>
+  <footer class="foot" id="foot"></footer>
 
 </div>
 
+<dialog id="unlock-dialog" class="unlock-dialog" aria-labelledby="unlock-title"><form id="unlock-form"><h2 id="unlock-title">Desbloquear archivo</h2><p id="unlock-name"></p><label>Contraseña<input id="unlock-password" type="password" autocomplete="current-password" required></label><p id="unlock-error" class="form-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="btn btn-secondary" id="unlock-cancel">Cancelar</button><button type="submit" class="btn btn-primary" id="unlock-submit">Desbloquear</button></div></form></dialog>
 </body>
 </html>

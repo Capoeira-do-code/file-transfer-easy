@@ -222,3 +222,34 @@ func TestOnChangeFires(t *testing.T) {
 		t.Error("una adición duplicada no debería notificar")
 	}
 }
+
+func TestReceivingPathIsHiddenFromSharedFolderRescans(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "incoming.txt")
+	if err := os.WriteFile(file, []byte("partial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(nil)
+	if _, err := store.AddPaths([]string{dir}); err != nil {
+		t.Fatal(err)
+	}
+	entry := store.Entries()[0]
+	release := store.ExcludePath(file)
+	store.Rescan(true)
+	if _, ok := store.Entry(entry.ID); ok {
+		t.Fatal("receiving file downloadable by ID")
+	}
+	if len(store.Entries()) != 0 || store.Totals().Files != 0 || store.Folders()[0].FileCount != 0 || store.Items()[0].FileCount != 0 {
+		t.Fatal("receiving file exposed through a shared folder snapshot")
+	}
+	if err := os.WriteFile(file, []byte("complete contents"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	release()
+	store.Rescan(true)
+	entries := store.Entries()
+	if len(entries) != 1 || entries[0].Size != 17 || store.Totals().Files != 1 {
+		t.Fatalf("completed file did not become available: %+v", entries)
+	}
+}

@@ -1,15 +1,15 @@
-name: Build desktop app
+name: macOS build artifact
 
-# Push a tag to cut a release:
-#   git tag v1.0.1 && git push origin v1.0.1
-#
-# Running the workflow by hand just produces downloadable artifacts.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
-  pull_request:
-    paths: ["go-app/**", ".github/workflows/build.yml"]
+    inputs:
+      version:
+        description: Version X.Y.Z from the reviewed source snapshot
+        type: string
+        required: true
+
+permissions:
+  contents: read
 
 defaults:
   run:
@@ -17,201 +17,59 @@ defaults:
 
 jobs:
   test:
-    name: Pruebas
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go-app/go.mod
           cache-dependency-path: go-app/go.sum
-
-      # The GUI needs GTK/WebKit headers on Linux; the tests do not touch the
-      # desktop layer, so only the pure packages are exercised here.
-      - name: go vet
-        run: go vet ./internal/...
-
-      - name: Pruebas con detector de carreras
-        run: go test -race ./internal/...
+      - name: Validate version and source snapshot
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$VERSION" = "$(cat VERSION)"
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          root = pathlib.Path('..')
+          manifest = json.loads((root / 'BUILD-SNAPSHOT.json').read_text())
+          for name, expected in manifest['files'].items():
+              assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected, name
+          print('Source snapshot hashes verified')
+          PY
+      - run: go vet ./internal/...
+      - run: go test -race ./internal/...
 
   macos:
-    name: macOS (.dmg)
     needs: test
-    runs-on: macos-14
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ inputs.version }}
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+      CGO_CFLAGS: '-mmacosx-version-min=13.0'
+      CGO_LDFLAGS: '-mmacosx-version-min=13.0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go-app/go.mod
           cache-dependency-path: go-app/go.sum
-
-      - name: Determinar la versión
-        id: version
+      - name: Check frontend and native macOS integration
         run: |
-          version=1.0.1
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Comprobar la interfaz en JavaScriptCore
-        run: swift scripts/test-ui.swift
-
-      - name: Comprobar recepción nativa de archivos en macOS
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "13.0"
-          CGO_CFLAGS: "-mmacosx-version-min=13.0"
-          CGO_LDFLAGS: "-mmacosx-version-min=13.0"
-        run: |
+          swift scripts/test-ui.swift
           bash scripts/test-native-macos.sh
           go run ./cmd/genicons
           go test -race .
-
-      - name: Construir el paquete y el .dmg
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          chmod +x scripts/build-macos.sh
-          ./scripts/build-macos.sh
-
+      - name: Build universal app and verify disk image
+        run: bash scripts/build-macos.sh
       - uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
           path: |
             go-app/dist/*.dmg
-            go-app/dist/*.sha256
+            go-app/dist/*.dmg.sha256
           if-no-files-found: error
-
-  linux:
-    name: Linux (${{ matrix.arch }})
-    needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            arch: amd64
-          - runner: ubuntu-24.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go-app/go.mod
-          cache-dependency-path: go-app/go.sum
-
-      - name: Instalar dependencias
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config python3 libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev xdg-utils desktop-file-utils xvfb dbus-x11
-
-      - name: Determinar la versión
-        id: version
-        run: |
-          version=1.0.1
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Construir paquetes Linux
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
-          ARCH: ${{ matrix.arch }}
-        run: bash scripts/build-linux.sh
-
-      - name: Comprobar argumentos de apertura
-        run: go test -race -tags gtk3 .
-
-      - name: Validar e instalar el paquete
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          cd dist
-          sha256sum -c "FileTransferEasy-$VERSION-linux-$ARCH.deb.sha256"
-          sha256sum -c "FileTransferEasy-$VERSION-linux-$ARCH.tar.gz.sha256"
-          dpkg-deb --info "FileTransferEasy-$VERSION-linux-$ARCH.deb"
-          sudo apt-get install -y "./FileTransferEasy-$VERSION-linux-$ARCH.deb"
-          desktop-file-validate /usr/share/applications/org.wails.file_transfer_easy.desktop
-          xvfb-run -a dbus-run-session -- python3 ../scripts/test-linux-launch.py
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-${{ matrix.arch }}
-          path: |
-            go-app/dist/*-linux-*.deb
-            go-app/dist/*-linux-*.tar.gz
-            go-app/dist/*-linux-*.sha256
-          if-no-files-found: error
-
-  windows:
-    name: Windows (.exe)
-    needs: test
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go-app/go.mod
-          cache-dependency-path: go-app/go.sum
-
-      - name: Determinar la versión
-        id: version
-        shell: bash
-        run: |
-          version=1.0.1
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Instalar NSIS
-        run: choco install nsis --no-progress -y
-
-      - name: Construir el .exe y el instalador
-        shell: pwsh
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          # choco puts makensis here but does not add it to PATH for this step.
-          $env:PATH = "$env:PATH;C:\Program Files (x86)\NSIS"
-          .\scripts\build-windows.ps1
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-exe
-          path: |
-            go-app/dist/FileTransferEasy.exe
-            go-app/dist/FileTransferEasy-Setup-*.exe
-          if-no-files-found: error
-
-  release:
-    name: Publicar la release
-    needs: [macos, windows, linux]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
-          body: |
-            ## Instalación
-
-            **macOS** — abre el `.dmg` y arrastra la app a Aplicaciones. La
-            entrega usa firma ad hoc y Gatekeeper puede bloquearla en otros equipos.
-            La distribución pública requiere Developer ID y notarización.
-
-            **Windows** — usa el instalador, o el `.exe` portable si prefieres
-            no instalar nada. Necesita el runtime de WebView2, que ya viene con
-            Windows 11 y con Windows 10 actualizado.
-
-            **Linux** — en Debian 12 o Ubuntu 24.04 y posteriores, instala el
-            `.deb` de tu arquitectura con `sudo apt install ./archivo.deb`.
-            El `.tar.gz` incluye un instalador por usuario. Requiere GTK3 y
-            WebKitGTK 4.1; la bandeja depende del entorno de escritorio.
-
-            La primera vez que compartas algo, la app descarga `cloudflared`
-            automáticamente.
+          retention-days: 7

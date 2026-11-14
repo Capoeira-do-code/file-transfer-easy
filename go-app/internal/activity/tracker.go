@@ -44,7 +44,7 @@ type Transfer struct {
 	ID       string
 	Name     string
 	IP       string
-	Kind     string // "file" or "zip"
+	Kind     string // "file", "zip" or "upload"
 	Status   string // active, done, cancelled, error
 	Bytes    int64
 	Total    int64
@@ -80,9 +80,11 @@ type TransferSnapshot struct {
 
 // Stats are the cumulative counters shown in the window.
 type Stats struct {
-	Downloads int
-	Bytes     int64
-	Visitors  int
+	Downloads     int
+	Bytes         int64
+	Visitors      int
+	Uploads       int
+	ReceivedBytes int64
 }
 
 // LogEntry is one line of the activity log.
@@ -94,11 +96,12 @@ type LogEntry struct {
 
 // Tracker owns all live activity state.
 type Tracker struct {
-	mu        sync.RWMutex
-	visitors  map[string]*Visitor
-	transfers []*Transfer
-	stats     Stats
-	log       []LogEntry
+	mu         sync.RWMutex
+	visitors   map[string]*Visitor
+	suppressed map[string]bool
+	transfers  []*Transfer
+	stats      Stats
+	log        []LogEntry
 
 	onChange func()
 }
@@ -107,8 +110,9 @@ type Tracker struct {
 // worth re-rendering happened.
 func New(onChange func()) *Tracker {
 	return &Tracker{
-		visitors: make(map[string]*Visitor),
-		onChange: onChange,
+		visitors:   make(map[string]*Visitor),
+		suppressed: make(map[string]bool),
+		onChange:   onChange,
 	}
 }
 
@@ -131,6 +135,10 @@ func (t *Tracker) Seen(ip, userAgent string) {
 	now := time.Now()
 
 	t.mu.Lock()
+	if t.suppressed[ip] {
+		t.mu.Unlock()
+		return
+	}
 	visitor, ok := t.visitors[ip]
 	fresh := !ok
 	if !ok {
@@ -157,6 +165,15 @@ func (t *Tracker) Seen(ip, userAgent string) {
 	if fresh || wasOffline {
 		t.notify()
 	}
+}
+
+// Visit marks an actual page opening, unlike a background heartbeat. A person
+// removed from the live list can appear again after deliberately reopening it.
+func (t *Tracker) Visit(ip, userAgent string) {
+	t.mu.Lock()
+	delete(t.suppressed, ip)
+	t.mu.Unlock()
+	t.Seen(ip, userAgent)
 }
 
 func (t *Tracker) pruneVisitorsLocked(now time.Time) {
@@ -186,6 +203,7 @@ func (t *Tracker) Forget(id string) bool {
 	for ip, visitor := range t.visitors {
 		if visitor.ID == id {
 			delete(t.visitors, ip)
+			t.suppressed[ip] = true
 			found = true
 			break
 		}
@@ -218,7 +236,11 @@ func (t *Tracker) StartTransfer(kind, name, ip string, total int64) *Transfer {
 	t.pruneTransfersLocked()
 	t.mu.Unlock()
 
-	t.Logf("info", "%s empieza a descargar %s", ip, name)
+	if kind == "upload" {
+		t.Logf("info", "%s empieza a enviar %s", ip, name)
+	} else {
+		t.Logf("info", "%s empieza a descargar %s", ip, name)
+	}
 	t.notify()
 	return transfer
 }
@@ -258,12 +280,17 @@ func (t *Tracker) FinishTransfer(transfer *Transfer, status string) {
 		if transfer.Total > 0 {
 			transfer.Bytes = transfer.Total
 		}
-		t.stats.Downloads++
-		t.stats.Bytes += transfer.Bytes
-		if visitor, ok := t.visitors[transfer.IP]; ok {
-			visitor.Downloads++
-			visitor.Bytes += transfer.Bytes
-			visitor.LastSeen = now
+		if transfer.Kind == "upload" {
+			t.stats.Uploads++
+			t.stats.ReceivedBytes += transfer.Bytes
+		} else {
+			t.stats.Downloads++
+			t.stats.Bytes += transfer.Bytes
+			if visitor, ok := t.visitors[transfer.IP]; ok {
+				visitor.Downloads++
+				visitor.Bytes += transfer.Bytes
+				visitor.LastSeen = now
+			}
 		}
 	}
 	t.pruneTransfersLocked()
@@ -273,9 +300,9 @@ func (t *Tracker) FinishTransfer(transfer *Transfer, status string) {
 	case "done":
 		t.Logf("info", "%s completó %s", transfer.IP, transfer.Name)
 	case "cancelled":
-		t.Logf("warn", "Descarga cancelada: %s", transfer.Name)
+		t.Logf("warn", "Transferencia cancelada: %s", transfer.Name)
 	case "error":
-		t.Logf("error", "Fallo al enviar %s", transfer.Name)
+		t.Logf("error", "Fallo en la transferencia de %s", transfer.Name)
 	}
 	t.notify()
 }
@@ -319,6 +346,21 @@ func (t *Tracker) Cancel(id string) bool {
 	}
 	target.cancelOnce.Do(func() { close(target.cancel) })
 	return true
+}
+
+// CancelIP aborts active transfers belonging to a blocked visitor.
+func (t *Tracker) CancelIP(ip string) {
+	t.mu.RLock()
+	var active []*Transfer
+	for _, transfer := range t.transfers {
+		if transfer.IP == ip && transfer.Status == "active" {
+			active = append(active, transfer)
+		}
+	}
+	t.mu.RUnlock()
+	for _, transfer := range active {
+		transfer.cancelOnce.Do(func() { close(transfer.cancel) })
+	}
 }
 
 // CancelAll aborts every in-flight transfer, used when sharing stops.
@@ -416,6 +458,7 @@ func (t *Tracker) Snapshot() ([]Visitor, []TransferSnapshot, Stats, []LogEntry) 
 func (t *Tracker) Reset() {
 	t.mu.Lock()
 	t.visitors = make(map[string]*Visitor)
+	t.suppressed = make(map[string]bool)
 	t.transfers = nil
 	t.mu.Unlock()
 	t.notify()

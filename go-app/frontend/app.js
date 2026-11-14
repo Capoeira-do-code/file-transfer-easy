@@ -146,8 +146,8 @@
         if (data && data.ok === false) return { ok: false, error: data.error || 'La acción no se pudo completar' };
         return { ok: true, data: data };
       });
-    }).catch(function () {
-      return { ok: false, error: 'Sin conexión con la aplicación' };
+    }).catch(function (error) {
+      return { ok: false, error: 'No se pudo conectar con la aplicación' + (error && error.message ? ': ' + error.message : '') };
     });
   }
 
@@ -433,7 +433,19 @@
       act('/api/items/remove', { ids: [li.dataset.id] });
     });
 
+    var more = el('button', 'iconbtn iconbtn-sm');
+    more.type = 'button'; more.appendChild(icon('more')); more.title = 'Más opciones';
+    more.setAttribute('aria-label', 'Más opciones del archivo'); more.setAttribute('aria-haspopup', 'menu');
+    more.addEventListener('click', function () { openItemMenu(li.__item, more); });
+    li.tabIndex = 0;
+    li.addEventListener('contextmenu', function (event) { event.preventDefault(); openItemMenu(li.__item, li, event.clientX, event.clientY); });
+    li.addEventListener('keydown', function (event) { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); openItemMenu(li.__item, li); } });
+    var protection = el('span', 'item-protection', 'Protegido'); protection.hidden = true;
+    protection.insertBefore(icon('lock'), protection.firstChild);
+    meta.appendChild(protection);
+    li.__protection = protection;
     actions.appendChild(reveal);
+    actions.appendChild(more);
     actions.appendChild(remove);
     li.appendChild(actions);
 
@@ -443,6 +455,8 @@
 
   function updateItem(li, d) {
     var r = li.__refs;
+    li.__item = d;
+    show(li.__protection, !!d.protected);
     txt(r.name, d.name || '');
     attr(li, 'title', d.path || d.name || null);
 
@@ -576,7 +590,9 @@
 
     var body = el('div', 'vis-body');
     var top = el('div', 'vis-top');
-    var ip = el('span', 'vis-ip mono');
+    var ip = el('button', 'vis-ip visitor-name-button');
+    ip.type = 'button'; ip.title = 'Cambiar nombre';
+    ip.addEventListener('click', function () { renameVisitor(li.__visitor); });
     var dot = el('span', 'onlinedot');
     top.appendChild(ip);
     top.appendChild(dot);
@@ -595,6 +611,10 @@
     forget.addEventListener('click', function () {
       act('/api/visitors/forget', { id: li.dataset.id });
     });
+    var block = el('button', 'iconbtn iconbtn-sm'); block.type = 'button'; block.textContent = '⊘';
+    block.addEventListener('click', function () { blockVisitor(li.__visitor); });
+    li.__block = block;
+    actions.appendChild(block);
     actions.appendChild(forget);
 
     li.appendChild(avatar);
@@ -609,8 +629,12 @@
   function updateVisitor(li, d) {
     var r = li.__refs;
     txt(r.avatar, initialsOf(d));
-    txt(r.ip, d.ip || '—');
-    txt(r.label, d.label || 'Visitante');
+    li.__visitor = d;
+    txt(r.ip, d.name || d.ip || '—');
+    txt(r.label, join([d.name ? d.ip : '', d.label || 'Visitante']));
+    attr(li.__block, 'aria-label', d.blocked ? 'Desbloquear visitante' : 'Bloquear visitante');
+    attr(li.__block, 'title', d.blocked ? 'Desbloquear' : 'Bloquear');
+    cls(li, 'is-blocked', !!d.blocked);
     attr(li, 'title', join([d.label, d.ip, d.lastSeen ? 'visto a las ' + hhmm(d.lastSeen) : '']) || null);
     cls(r.dot, 'is-online', !!d.online);
     attr(r.dot, 'title', d.online ? 'En línea' : 'Desconectado');
@@ -681,7 +705,8 @@
     var stats = s.stats || {};
     var log = Array.isArray(s.log) ? s.log : [];
 
-    var empty = items.length === 0;
+    var empty = items.length === 0 && !BUSY_SHARE[share.status] && share.status !== 'error';
+    renderExtended(s);
     renderShare(share);
     show(E.viewEmpty, empty);
     show(E.viewActive, !empty);
@@ -744,10 +769,6 @@
   }
 
   function bind() {
-    var isMac = /Macintosh/.test(navigator.userAgent || '');
-    var dropHint = $('#drop-hint');
-    if (dropHint) txt(dropHint, isMac ? 'También puedes añadirlos desde el Dock o la barra de menús.' : 'El enlace se crea al añadir contenido.');
-    if (!isMac) txt($('#active-session-note'), 'Mantén el equipo encendido y la app abierta. Abre la app de nuevo para recuperar la ventana.');
     document.addEventListener('click', function (ev) {
       var b = ev.target.closest ? ev.target.closest('[data-act]') : null;
       if (b && b.dataset.act) runAdd(b.dataset.act);
@@ -901,8 +922,8 @@
         return res.json();
       })
       .then(apply)
-      .catch(function () {
-        toast('No se pudo cargar el estado de la aplicación', 'error');
+      .catch(function (error) {
+        toast('No se pudo cargar el estado de la aplicación' + (error && error.message ? ': ' + error.message : ''), 'error');
         apply({ items: [] });
       });
   }
@@ -911,19 +932,276 @@
    *  boot
    * ------------------------------------------------------------------ */
 
+  /* Settings, access decisions and file actions stay on the guarded UI API. */
+  var settingsTab = 'general', passwordChanged = false, passwordCleared = false;
+  var menuReturnFocus = null, editAction = null, editReturnFocus = null, editVersion = 0;
+  var seenRequests = Object.create(null), didSeeRequests = false;
+
+  function applyTheme(theme) {
+    theme = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('fte-theme', theme); } catch (e) {}
+    attr($('#btn-theme'), 'aria-label', theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro');
+  }
+
+  function dialogOpen(dialog) {
+    if (dialog.open) return;
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+  function dialogClose(dialog) {
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+  function inlineError(node, message) { txt(node, message || ''); show(node, !!message); }
+  function refreshAction(path, body, message) {
+    return act(path, body, message).then(function (result) {
+      if (result.ok) return loadState().then(function () { return result; });
+      return result;
+    });
+  }
+
+  function openEdit(options) {
+    editAction = options.submit; editVersion++;
+    $('#edit-submit').disabled = false;
+    editReturnFocus = document.activeElement;
+    txt($('#edit-title'), options.title);
+    txt($('#edit-description'), options.description || '');
+    show($('#edit-description'), !!options.description);
+    txt($('#edit-label'), options.label || '');
+    show($('#edit-field'), options.input !== false);
+    var input = $('#edit-input');
+    input.type = options.type || 'text';
+    input.value = options.value || '';
+    input.maxLength = options.maxLength || 256;
+    input.required = !!options.required;
+    input.autocomplete = options.type === 'password' ? 'new-password' : 'off';
+    txt($('#edit-submit'), options.confirm || 'Guardar');
+    cls($('#edit-submit'), 'btn-danger', !!options.destructive);
+    inlineError($('#edit-error'), '');
+    dialogOpen($('#edit-dialog'));
+    setTimeout(function () { (options.input === false ? $('#edit-submit') : input).focus(); }, 0);
+  }
+
+  function editItemPassword(item, remove) {
+    openEdit({
+      title: remove ? 'Quitar contraseña' : item.protected ? 'Cambiar contraseña' : 'Proteger con contraseña',
+      description: remove ? 'Se podrá descargar «' + item.name + '» sin esta contraseña.' : item.name + (item.kind === 'folder' ? ' · La contraseña se aplica a los archivos de la carpeta.' : ''),
+      label: 'Nueva contraseña', type: 'password', input: !remove, required: !remove,
+      confirm: remove ? 'Quitar contraseña' : 'Guardar contraseña',
+      submit: function (value) { return post('/api/items/password', { id: item.id, password: remove ? '' : value }); }
+    });
+  }
+
+  function closeItemMenu(restore) {
+    show($('#item-menu'), false);
+    if (restore && menuReturnFocus && typeof menuReturnFocus.focus === 'function') menuReturnFocus.focus();
+  }
+  function openItemMenu(item, anchor, x, y) {
+    var menu = $('#item-menu');
+    menu.replaceChildren();
+    menuReturnFocus = anchor;
+    function option(label, action, danger) {
+      var button = el('button', danger ? 'is-danger' : '', label);
+      button.type = 'button'; button.setAttribute('role', 'menuitem');
+      button.addEventListener('click', function () { closeItemMenu(true); action(); });
+      menu.appendChild(button);
+    }
+    option('Mostrar en el explorador', function () { refreshAction('/api/items/reveal', { id: item.id }); });
+    option(item.protected ? 'Cambiar contraseña…' : 'Proteger con contraseña…', function () { editItemPassword(item, false); });
+    if (item.protected) option('Quitar contraseña…', function () { editItemPassword(item, true); });
+    menu.appendChild(el('hr'));
+    option('Quitar de la lista', function () { refreshAction('/api/items/remove', { ids: [item.id] }); }, true);
+    show(menu, true);
+    var rect = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(x == null ? rect.right - 230 : x, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    menu.style.top = Math.max(8, Math.min(y == null ? rect.bottom + 3 : y, window.innerHeight - menu.offsetHeight - 8)) + 'px';
+    menu.querySelector('button').focus();
+  }
+
+  function renameVisitor(visitor) {
+    openEdit({ title: 'Nombre del visitante', description: visitor.ip, label: 'Nombre',
+      value: visitor.name || '', maxLength: 80,
+      submit: function (name) { return post('/api/visitors/name', { ip: visitor.ip, name: name.trim() }); }
+    });
+  }
+  function blockVisitor(visitor) {
+    return refreshAction('/api/visitors/block', { ip: visitor.ip, blocked: !visitor.blocked }, visitor.blocked ? 'Visitante desbloqueado' : 'Visitante bloqueado');
+  }
+  function deleteHistory(visitor) {
+    openEdit({ title: 'Borrar del historial', description: 'Se borrará el registro de ' + (visitor.name || visitor.ip) + '.', input: false,
+      confirm: 'Borrar historial', destructive: true,
+      submit: function () { return post('/api/history/delete', { ip: visitor.ip }); }
+    });
+  }
+
+  function showSettingsTab(name, focus) {
+    settingsTab = name;
+    var tabs = document.querySelectorAll('[data-settings-tab]');
+    for (var i = 0; i < tabs.length; i++) {
+      var selected = tabs[i].dataset.settingsTab === name;
+      tabs[i].setAttribute('aria-selected', String(selected));
+      tabs[i].tabIndex = selected ? 0 : -1;
+      show($('#settings-' + tabs[i].dataset.settingsTab), selected);
+      if (selected && focus) tabs[i].focus();
+    }
+  }
+  function openSettings() {
+    var settings = (state && state.settings) || {};
+    $('#setting-theme').value = settings.theme === 'dark' ? 'dark' : 'light';
+    $('#setting-title').value = settings.pageTitle || '';
+    $('#setting-approval').checked = !!settings.requireApproval;
+    $('#setting-uploads').checked = !!settings.uploadsEnabled;
+    $('#setting-upload-dir').value = settings.uploadDir || '';
+    $('#setting-max-upload').value = settings.maxUploadMB || 100;
+    $('#setting-password').value = '';
+    passwordChanged = false; passwordCleared = false;
+    txt($('#password-change-hint'), '');
+    txt($('#page-password-status'), settings.pagePasswordSet ? 'Contraseña establecida' : 'Sin contraseña');
+    $('#clear-page-password').disabled = !settings.pagePasswordSet;
+    inlineError($('#settings-error'), '');
+    renderHistory();
+    showSettingsTab(settingsTab, false);
+    dialogOpen($('#settings-dialog'));
+  }
+
+  function renderHistory() {
+    var history = state && Array.isArray(state.history) ? state.history : [];
+    var query = String($('#history-search').value || '').trim().toLowerCase();
+    var filtered = history.filter(function (visitor) { return !query || [visitor.name, visitor.ip, visitor.label].join(' ').toLowerCase().indexOf(query) >= 0; });
+    var list = $('#history-list'); list.replaceChildren();
+    txt($('#history-count'), history.length + ' ' + plural(history.length, 'visitante guardado', 'visitantes guardados'));
+    show($('#history-empty'), filtered.length === 0);
+    txt($('#history-empty'), query ? 'No hay visitantes que coincidan.' : 'Todavía no hay visitas.');
+    filtered.forEach(function (visitor) {
+      var row = el('li', 'history-row'), main = el('div', 'history-main');
+      var person = el('div', 'history-person'); person.appendChild(el('strong', '', visitor.name || visitor.ip));
+      if (visitor.blocked) person.appendChild(el('span', 'blocked-label', 'Bloqueado'));
+      person.appendChild(el('small', '', join([visitor.name ? visitor.ip : '', visitor.label])));
+      var actions = el('div', 'history-actions');
+      function action(label, callback, danger) { var button = el('button', 'btn btn-sm btn-ghost' + (danger ? ' is-danger' : ''), label); button.type = 'button'; button.addEventListener('click', callback); actions.appendChild(button); }
+      action('Nombre', function () { renameVisitor(visitor); });
+      action(visitor.blocked ? 'Desbloquear' : 'Bloquear', function () { blockVisitor(visitor); });
+      action('Borrar', function () { deleteHistory(visitor); }, true);
+      main.appendChild(person); main.appendChild(actions); row.appendChild(main);
+      var last = visitor.lastSeen ? new Date(visitor.lastSeen).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+      row.appendChild(el('p', 'history-stats', join([nfmt(visitor.visits) + ' visitas', nfmt(visitor.downloads) + ' descargas', visitor.bytesText || fmtBytes(visitor.bytes), last])));
+      list.appendChild(row);
+    });
+  }
+
+  function renderRequests(requests) {
+    requests = Array.isArray(requests) ? requests.filter(function (request) { return request.status === 'pending'; }) : [];
+    var list = $('#request-list');
+    show($('#request-panel'), requests.length > 0);
+    txt($('#request-count'), requests.length);
+    var next = Object.create(null), fresh = [];
+    requests.forEach(function (request) { next[request.id] = true; if (!seenRequests[request.id]) fresh.push(request); });
+    if (fresh.length && didSeeRequests) toast(fresh.length === 1 ? 'Nueva solicitud de acceso de ' + (fresh[0].name || fresh[0].ip) : fresh.length + ' nuevas solicitudes de acceso');
+    seenRequests = next; didSeeRequests = true;
+    syncList(list, requests, function () { return el('li', 'request-row'); }, function (row, request) {
+      row.replaceChildren();
+      var person = el('div', 'request-person'); person.appendChild(el('strong', '', request.name || request.ip));
+      person.appendChild(el('small', '', join([request.name ? request.ip : '', request.label]))); row.appendChild(person);
+      function respond(accept) {
+        var buttons = row.querySelectorAll('button'); for (var i = 0; i < buttons.length; i++) buttons[i].disabled = true;
+        refreshAction('/api/requests/respond', { id: request.id, accept: accept }, accept ? 'Acceso autorizado' : 'Solicitud rechazada').then(function (result) { if (!result.ok) for (var i = 0; i < buttons.length; i++) buttons[i].disabled = false; });
+      }
+      var deny = el('button', 'btn btn-sm', 'Rechazar'); deny.type = 'button'; deny.addEventListener('click', function () { respond(false); });
+      var allow = el('button', 'btn btn-primary btn-sm', 'Aceptar'); allow.type = 'button'; allow.addEventListener('click', function () { respond(true); });
+      row.appendChild(deny); row.appendChild(allow);
+    });
+  }
+
+  function renderExtended(snapshot) {
+    var settings = snapshot.settings;
+    if (settings) applyTheme(settings.theme);
+    show($('#btn-receive'), !!(settings && settings.uploadsEnabled));
+    show($('#items-none'), !(snapshot.items && snapshot.items.length));
+    txt($('#items-none'), settings && settings.uploadsEnabled ? 'Todavía no hay archivos. La recepción está habilitada en el enlace.' : 'No hay archivos compartidos.');
+    txt($('#security-summary'), join([settings && settings.pagePasswordSet ? 'Página protegida' : '', settings && settings.requireApproval ? 'Aprobación de visitas' : '', settings && settings.uploadsEnabled ? 'Recepción habilitada' : '']));
+    renderRequests(snapshot.requests);
+    if ($('#settings-dialog').open && settingsTab === 'history') renderHistory();
+  }
+
+  function bindExtended() {
+    $('#btn-settings').addEventListener('click', openSettings);
+    $('#settings-close').addEventListener('click', function () { dialogClose($('#settings-dialog')); });
+    $('#settings-cancel').addEventListener('click', function () { dialogClose($('#settings-dialog')); });
+    $('#btn-theme').addEventListener('click', function () {
+      var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      refreshAction('/api/settings', { theme: theme }).then(function (result) { if (result.ok) applyTheme(theme); });
+    });
+    $('#btn-receive').addEventListener('click', function () { refreshAction('/api/share/start'); });
+    $('#setting-password').addEventListener('input', function () { passwordChanged = true; passwordCleared = false; txt($('#password-change-hint'), 'La contraseña cambiará al guardar.'); });
+    $('#clear-page-password').addEventListener('click', function () { passwordChanged = true; passwordCleared = true; $('#setting-password').value = ''; txt($('#password-change-hint'), 'Se quitará la contraseña al guardar.'); });
+    $('#history-search').addEventListener('input', renderHistory);
+    $('#browse-upload-folder').addEventListener('click', function () {
+      var button = this; button.disabled = true;
+      post('/api/settings/upload-folder').then(function (result) { button.disabled = false; if (!result.ok) inlineError($('#settings-error'), result.error); else if (result.data && result.data.path) $('#setting-upload-dir').value = result.data.path; });
+    });
+    var tabs = document.querySelectorAll('[data-settings-tab]');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].addEventListener('click', function () { showSettingsTab(this.dataset.settingsTab, false); if (settingsTab === 'history') renderHistory(); });
+      tabs[i].addEventListener('keydown', function (event) {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        event.preventDefault(); var index = Array.prototype.indexOf.call(tabs, this), direction = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+        showSettingsTab(tabs[(index + direction + tabs.length) % tabs.length].dataset.settingsTab, true);
+      });
+    }
+    $('#settings-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      var maximum = Number($('#setting-max-upload').value);
+      if (!Number.isInteger(maximum) || maximum < 1) { inlineError($('#settings-error'), 'Introduce un tamaño máximo válido, en MB.'); return; }
+      var patch = { theme: $('#setting-theme').value, pageTitle: $('#setting-title').value.trim(), requireApproval: $('#setting-approval').checked, uploadsEnabled: $('#setting-uploads').checked, uploadDir: $('#setting-upload-dir').value.trim(), maxUploadMB: maximum };
+      if (passwordChanged) patch.pagePassword = passwordCleared ? '' : $('#setting-password').value;
+      $('#settings-save').disabled = true; inlineError($('#settings-error'), '');
+      post('/api/settings', patch).then(function (result) {
+        $('#settings-save').disabled = false;
+        if (!result.ok) { inlineError($('#settings-error'), result.error); return; }
+        applyTheme(patch.theme); dialogClose($('#settings-dialog')); toast('Configuración guardada', 'ok'); loadState();
+      });
+    });
+    $('#edit-cancel').addEventListener('click', function () { dialogClose($('#edit-dialog')); if (editReturnFocus && editReturnFocus.focus) editReturnFocus.focus(); });
+    $('#edit-form').addEventListener('submit', function (event) {
+      event.preventDefault(); if (!editAction) return;
+      var version = editVersion;
+      $('#edit-submit').disabled = true; inlineError($('#edit-error'), '');
+      editAction($('#edit-input').value).then(function (result) {
+        if (version !== editVersion) return;
+        $('#edit-submit').disabled = false;
+        if (!result.ok) { inlineError($('#edit-error'), result.error); return; }
+        dialogClose($('#edit-dialog')); loadState(); toast('Cambios guardados', 'ok');
+        if (editReturnFocus && editReturnFocus.focus) editReturnFocus.focus();
+      });
+    });
+    document.addEventListener('pointerdown', function (event) { var menu = $('#item-menu'); if (!menu.hidden && !menu.contains(event.target)) closeItemMenu(false); });
+    window.addEventListener('resize', function () { closeItemMenu(false); });
+    E.stage.addEventListener('scroll', function () { closeItemMenu(false); }, { passive: true });
+    $('#item-menu').addEventListener('keydown', function (event) {
+      var buttons = this.querySelectorAll('button'), index = Array.prototype.indexOf.call(buttons, document.activeElement);
+      if (event.key === 'Escape') { event.preventDefault(); closeItemMenu(true); }
+      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus(); }
+      else if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); buttons[event.key === 'Home' ? 0 : buttons.length - 1].focus(); }
+      else if (event.key === 'Tab') closeItemMenu(false);
+    });
+  }
+
+
   function boot() {
     if (/Mac|iPhone|iPad/i.test(navigator.userAgent || '')) {
       document.documentElement.classList.add('is-mac');
     }
     cache();
     bind();
+    bindExtended();
     bindDnd();
     paintClear();
     paintCopy();
     paintAddButtons();
 
-    /* keep both views hidden until the first state lands, so we never flash the
-       wrong screen; fall back to the empty state if the backend is slow */
+    /* The HTML already shows the add controls while the first state loads.
+       Initialise the empty state as well if the backend is slow. */
     setTimeout(function () { if (!gotState) apply({ items: [] }); }, 1200);
 
     loadState().then(connect);

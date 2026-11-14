@@ -1,9 +1,9 @@
 // Package publicweb serves the share page and the downloads that recipients
 // reach through the cloudflared tunnel.
 //
-// Every route lives under /s/<token>. Nothing here can mutate the shared set:
-// the admin surface is on a separate server bound to loopback, so a leaked
-// tunnel URL only ever exposes what the host chose to share.
+// Every route lives under /s/<token>. Administrative controls remain on a
+// separate loopback server. Recipients can read authorized files and, only
+// when enabled by the host, send files to the configured upload directory.
 package publicweb
 
 import (
@@ -14,24 +14,36 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/access"
 	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/activity"
 	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/core"
 )
 
 // Server answers public requests for one share session.
 type Server struct {
-	assets  fs.FS
-	store   *core.Store
-	tracker *activity.Tracker
-	token   string
-	mux     *http.ServeMux
+	assets   fs.FS
+	store    *core.Store
+	tracker  *activity.Tracker
+	access   *access.Manager
+	onUpload func([]string) error
+	token    string
+	mux      *http.ServeMux
 }
 
 // New builds a handler for a share session identified by token. assets is the
 // embedded page bundle (index.html, style.css, app.js), injected so the embed
 // directive can live next to the files themselves.
-func New(assets fs.FS, store *core.Store, tracker *activity.Tracker, token string) http.Handler {
+type Options struct {
+	Access   *access.Manager
+	OnUpload func([]string) error
+}
+
+func New(assets fs.FS, store *core.Store, tracker *activity.Tracker, token string, options ...Options) http.Handler {
 	s := &Server{assets: assets, store: store, tracker: tracker, token: token}
+	if len(options) > 0 {
+		s.access = options[0].Access
+		s.onUpload = options[0].OnUpload
+	}
 
 	mux := http.NewServeMux()
 	// The page lives at the trailing-slash form so that the relative asset
@@ -40,6 +52,12 @@ func New(assets fs.FS, store *core.Store, tracker *activity.Tracker, token strin
 	mux.HandleFunc("GET /s/{token}", s.redirectToPage)
 	mux.HandleFunc("GET /s/{token}/assets/{name}", s.handleAsset)
 	mux.HandleFunc("GET /s/{token}/api/manifest", s.handleManifest)
+	mux.HandleFunc("GET /s/{token}/api/access", s.handleAccess)
+	mux.HandleFunc("POST /s/{token}/api/access", s.handleAccess)
+	mux.HandleFunc("POST /s/{token}/api/unlock", s.handleUnlock)
+	mux.HandleFunc("GET /s/{token}/api/download/{id}", s.handleDownloadCheck)
+	mux.HandleFunc("GET /s/{token}/api/zip", s.handleZipCheck)
+	mux.HandleFunc("POST /s/{token}/upload", s.handleUpload)
 	mux.HandleFunc("GET /s/{token}/download/{id}", s.handleDownload)
 	mux.HandleFunc("GET /s/{token}/zip", s.handleZip)
 	mux.HandleFunc("POST /s/{token}/ping", s.handlePing)
@@ -75,22 +93,25 @@ func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
 // clientIP resolves the caller's address, trusting the header cloudflared sets
 // ahead of the generic proxy headers.
 func clientIP(r *http.Request) string {
-	if value := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); value != "" {
-		return value
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
 	}
-	if value := r.Header.Get("X-Forwarded-For"); value != "" {
-		if first, _, found := strings.Cut(value, ","); found {
-			return strings.TrimSpace(first)
+	remote := net.ParseIP(strings.TrimSpace(host))
+	// Only the loopback tunnel transport can supply forwarded identities.
+	// A direct LAN client must not bypass a blocked IP with a forged header.
+	if remote != nil && remote.IsLoopback() {
+		for _, header := range []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"} {
+			value := strings.TrimSpace(strings.SplitN(r.Header.Get(header), ",", 2)[0])
+			if ip := net.ParseIP(value); ip != nil {
+				return ip.String()
+			}
 		}
-		return strings.TrimSpace(value)
 	}
-	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
-		return value
+	if remote != nil {
+		return remote.String()
 	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

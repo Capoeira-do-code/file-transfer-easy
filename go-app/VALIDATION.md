@@ -1,4 +1,46 @@
-# Validación 1.0.1 — macOS y Linux
+# Validación
+
+## Interfaz e iconos de Windows 1.0.3 — 14 de noviembre de 2026
+
+- Interfaz de escritorio con superficies neutras, acento azul, tipografía del
+  sistema y controles compactos. Se retiran el título de portada, las
+  ilustraciones decorativas, las sombras de las tarjetas y las etiquetas redundantes.
+- Capturas de WebView2 con datos simulados, sin iniciar túneles: vista vacía y
+  sesión activa en claro/oscuro, a 1024 × 681 y 820 × 520. Sin desbordamiento
+  horizontal; contraste de texto superior a 4.5:1 en ambas paletas.
+- El ICO se incrusta como recurso `#3`, que espera Wails. Se asignan también
+  los iconos grande, pequeño y de clase de la ventana de Windows.
+- `node scripts/test-windows-ui.mjs` compara los iconos nativos con el ICO
+  píxel a píxel y comprueba bandeja, reapertura y recuperación tras caídas.
+- `go test ./...`, `go vet ./...` y estados de frontend vacío, preparación,
+  enlace activo y error.
+
+El ejecutable se entrega como `dist/FileTransferEasy-1.0.3.exe` para conservar
+la versión anterior mientras está abierta.
+
+## Corrección de Windows — 14 de noviembre de 2026
+
+- Wails actualizado de `v3.0.0-beta.11` a `v3.0.0`: recupera la WebView tras
+  caídas del renderer o del proceso del navegador, que antes dejaban la ventana vacía.
+- Eliminado el segundo `tray.Run()`: `SystemTray.New()` ya inicia el icono.
+  Un arranque instrumentado con `WndProcInterceptor` pasó de cuatro ventanas
+  nativas a tres al eliminar la creación extra del tray.
+- JavaScript y CSS se sirven con tipos MIME explícitos, independientemente de
+  las asociaciones del registro de Windows. La regresión simula `.js=text/csv`
+  y `.css=application/octet-stream`: fallaba antes y pasa con la corrección.
+- Los controles para añadir archivos se muestran desde el HTML inicial,
+  mientras llega el estado del servidor.
+- `node scripts/test-windows-ui.mjs`: WebView2 real con MIME incorrecto,
+  opciones y estilos, ocultar/reabrir sin duplicados y recuperación tras
+  `Page.crash` y `Browser.crash` manteniendo la misma sesión local.
+- `go test ./...`, `go vet ./...` y estados de frontend vacío, preparación,
+  enlace activo y error con un user-agent de Windows.
+
+El controlador visual del escritorio no estaba disponible. Estas comprobaciones
+usan el protocolo de diagnóstico de WebView2; no sustituyen una revisión manual
+de los menús y del icono sobre la barra de tareas.
+
+## Validación 1.0.1 — macOS y Linux
 
 Realizada el 4 de octubre de 2026 desde Apple Silicon, macOS 27.2.
 Los artefactos están generados; las comprobaciones nativas pendientes se indican abajo.
