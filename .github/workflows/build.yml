@@ -167,6 +167,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Generar iconos para las pruebas nativas
+        run: go run ./cmd/genicons
+
       - name: Comprobar Windows y WebView2 nativos
         run: node scripts/test-windows-ui.mjs
 

@@ -10,6 +10,16 @@ ventana y seguir compartiendo.
 Reescritura en Go de la app original en Python/PySide6, que sigue en la raíz del
 repositorio. Un ejecutable con webview del sistema; Linux requiere GTK3 y WebKitGTK 4.1.
 
+## Descargar la versión 1.1.0
+
+Los instaladores de Windows, el portable, el DMG universal de macOS y los paquetes
+Linux AMD64/ARM64 están en la [release 1.1.0](https://github.com/Capoeira-do-code/file-transfer-easy/releases/tag/v1.1.0).
+Consulta las [notas de la versión](../RELEASE_NOTES.md) para las novedades, los
+enlaces directos, las sumas SHA-256 y las comprobaciones realizadas.
+
+Antes de abrir la nueva versión, cierra la anterior con **«Salir»** desde la
+bandeja del sistema. macOS lleva firma ad hoc y no está notarizado por Apple.
+
 ## Ajustes y acceso en 1.1.0
 
 El botón de configuración está en la esquina superior derecha. El tema claro
@@ -112,7 +122,7 @@ Para publicar una release con los artefactos de las tres plataformas, empuja un 
 [el workflow](../.github/workflows/build.yml):
 
 ```bash
-git tag v1.0.1 && git push origin v1.0.1
+git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 ### Desarrollo

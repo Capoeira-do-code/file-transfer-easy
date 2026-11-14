@@ -1,8 +1,37 @@
 # File Transfer Easy
 
-Para la app actual de escritorio, el build universal de macOS y los paquetes de Linux, usa la
-[versión Go](go-app/README.md). La documentación siguiente corresponde a la
-versión original en Python.
+App de escritorio para compartir y recibir archivos mediante un enlace público.
+
+## Versión 1.1.0
+
+La versión 1.1.0 incluye una interfaz compacta, temas claro y oscuro sincronizados
+con la página pública, ajustes, contraseñas por archivo, carpeta o página,
+subidas configurables, historial con nombres, bloqueo de IP y aprobación de
+visitantes. Los textos se han simplificado y los errores muestran el motivo
+concreto. En Windows se corrigen la ventana vacía, los iconos duplicados de la
+bandeja y el icono «W» de la barra de tareas.
+
+| Plataforma | Descargas |
+| --- | --- |
+| Windows x64 | [Instalador](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-Setup-1.1.0.exe) · [Portable](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-1.1.0-windows-amd64.exe) |
+| macOS — Intel y Apple Silicon | [DMG universal](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-1.1.0.dmg) |
+| Linux AMD64 | [DEB](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-1.1.0-linux-amd64.deb) · [TAR.GZ](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-1.1.0-linux-amd64.tar.gz) |
+| Linux ARM64 | [DEB](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-1.1.0-linux-arm64.deb) · [TAR.GZ](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-1.1.0-linux-arm64.tar.gz) |
+
+[Ver la release y todos sus archivos](https://github.com/Capoeira-do-code/file-transfer-easy/releases/tag/v1.1.0)
+· [Notas completas de la versión](RELEASE_NOTES.md)
+· [Sumas SHA-256](https://github.com/Capoeira-do-code/file-transfer-easy/releases/download/v1.1.0/FileTransferEasy-1.1.0-SHA256SUMS.txt)
+· [Documentación de la app actual](go-app/README.md)
+
+Se comprobaron el acceso, las descargas y las subidas reales por Cloudflare, y
+la [compilación de macOS terminó correctamente](https://github.com/Capoeira-do-code/file-transfer-easy/actions/runs/43573901266).
+El DMG lleva firma ad hoc, sin notarización de Apple; Gatekeeper puede bloquearlo
+al abrirlo en otro equipo. Consulta [las indicaciones de macOS](go-app/MACOS_RELEASE.md).
+
+**Antes de actualizar, cierra la versión anterior desde «Salir» en la bandeja del
+sistema y después abre la nueva.**
+
+## Documentación de la versión original en Python
 
 App de escritorio para compartir archivos desde tu ordenador con una web cuidada para clientes y un panel admin integrado en una ventana nativa. Publica con Tailscale Funnel, Cloudflare Quick Tunnel o un puerto propio.
 
