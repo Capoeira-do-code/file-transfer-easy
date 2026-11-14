@@ -383,6 +383,7 @@ func (a *App) StartShare() error {
 	a.Tracker.CancelAll()
 	a.tunnel.Stop()
 	a.stopPublicServer()
+	a.Access.RevokeSessions()
 	a.mu.Lock()
 	a.lanURL, a.shareToken, a.publicPort = "", "", 0
 	a.liveSince = time.Time{}
@@ -522,6 +523,7 @@ func (a *App) StopShare() error {
 	a.Tracker.CancelAll()
 	a.tunnel.Stop()
 	a.stopPublicServer()
+	a.Access.RevokeSessions()
 	a.Tracker.Reset()
 
 	a.mu.Lock()

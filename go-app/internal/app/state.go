@@ -133,6 +133,12 @@ func (a *App) Snapshot() State {
 	items := a.Store.Items()
 	totals := a.Store.Totals()
 	visitors, transfers, stats, logs := a.Tracker.Snapshot()
+	requests := a.Access.Requests()
+	for i := range requests {
+		if name := a.Access.Name(requests[i].IP); name != "" {
+			requests[i].Name = name
+		}
+	}
 
 	state := State{
 		Items:     make([]ItemView, 0, len(items)),
@@ -157,7 +163,7 @@ func (a *App) Snapshot() State {
 		Share:    a.shareView(),
 		Settings: a.Access.Settings(),
 		History:  make([]HistoryView, 0),
-		Requests: a.Access.Requests(),
+		Requests: requests,
 	}
 
 	for _, item := range items {

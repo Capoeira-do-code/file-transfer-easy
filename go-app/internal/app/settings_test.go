@@ -107,3 +107,65 @@ func TestSettingsSurviveAppRestart(t *testing.T) {
 		t.Fatal("saved settings/visitor names were lost on restart")
 	}
 }
+
+func TestRememberedNameAppearsOnFutureAccessRequests(t *testing.T) {
+	a := New(t.TempDir(), &noopNative{}, testAssets())
+	defer a.Close()
+	const ip = "192.0.2.75"
+	if err := a.Access.SetName(ip, "Equipo de Ana"); err != nil {
+		t.Fatal(err)
+	}
+	require := true
+	if err := a.UpdateSettings(access.SettingsPatch{RequireApproval: &require}); err != nil {
+		t.Fatal(err)
+	}
+	session, err := a.Access.NewSession(ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Access.Access(session, ip, "test browser", "Nombre del navegador", "", false); err != nil {
+		t.Fatal(err)
+	}
+	requests := a.Snapshot().Requests
+	if len(requests) != 1 || requests[0].Name != "Equipo de Ana" {
+		t.Fatalf("remembered name was lost or replaced by an unverified browser name: %+v", requests)
+	}
+}
+
+func TestStoppingAndRestartingShareRevokesBrowserApproval(t *testing.T) {
+	a, _ := lifecycleFixture(t)
+	require := true
+	if err := a.UpdateSettings(access.SettingsPatch{RequireApproval: &require}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.StartShare(); err != nil {
+		t.Fatal(err)
+	}
+	const ip = "192.0.2.49"
+	id, err := a.Access.NewSession(ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := a.Access.Access(id, ip, "test browser", "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Access.Respond(decision.RequestID, true); err != nil {
+		t.Fatal(err)
+	}
+	if a.Access.Authorize(id, ip).Status != "allowed" {
+		t.Fatal("initial approval failed")
+	}
+	if err := a.StopShare(); err != nil {
+		t.Fatal(err)
+	}
+	if a.Access.ValidSession(id, ip) || len(a.Access.Requests()) != 0 {
+		t.Fatal("old browser permissions survived share stop")
+	}
+	if err := a.StartShare(); err != nil {
+		t.Fatal(err)
+	}
+	if a.Access.Authorize(id, ip).Status == "allowed" {
+		t.Fatal("replayed old cookie bypassed approval on new share")
+	}
+}

@@ -67,6 +67,13 @@ python scripts/macos-ci.py status --directory dist/macos-ci-1.1.0
 python scripts/macos-ci.py download --directory dist/macos-ci-1.1.0 --output dist
 ```
 
+Para la rama pública autorizada, el envío se realiza con
+`--mode public-branch --repository Capoeira-do-code/file-transfer-easy
+--branch build/1.1.0-macos-...`. Una nueva carpeta preparada puede actualizar
+esa misma rama con `--update-branch`: sólo permite avanzar su historial, sin
+force push. `cancel` detiene únicamente la corrida del snapshot indicado cuando
+otra corrección lo deja obsoleto.
+
 `status` es de lectura. `download` comprueba SHA-256 y la firma de formato UDIF
 del DMG. El helper conserva el repositorio o la rama remotos; no crea tags, PRs
 ni releases y nunca los borra automáticamente.

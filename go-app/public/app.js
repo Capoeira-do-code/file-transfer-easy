@@ -485,8 +485,9 @@
   function openUnlock(file) {
     unlockTarget = file; unlockReturnFocus = document.activeElement;
     var dialog = document.getElementById('unlock-dialog');
-    document.getElementById('unlock-title').textContent = file.folder ? 'Desbloquear carpeta' : 'Desbloquear archivo';
-    document.getElementById('unlock-name').textContent = file.folder || file.name;
+    var kind = file.protectionKind || (file.folder ? 'folder' : 'file');
+    document.getElementById('unlock-title').textContent = kind === 'folder' ? 'Desbloquear carpeta' : 'Desbloquear archivo';
+    document.getElementById('unlock-name').textContent = file.protectionName || (kind === 'folder' ? file.folder || file.name : file.name);
     document.getElementById('unlock-password').value = '';
     document.getElementById('unlock-error').hidden = true;
     if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');

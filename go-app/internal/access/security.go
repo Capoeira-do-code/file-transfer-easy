@@ -349,6 +349,64 @@ func (m *Manager) ItemAllowed(sessionID, ip, id string) bool {
 	s := m.sessions[sessionID]
 	return s != nil && s.IP == ip && time.Now().Before(s.Expires) && s.Grants[id]
 }
+
+func (m *Manager) effectiveOwnerLocked(fileID string, folderOwners []string) string {
+	// An explicit file password overrides every containing folder, including
+	// an otherwise unprotected loose/folder alias of that same file ID.
+	if hash := m.itemPasswords[fileID]; !hash.empty() {
+		return fileID
+	}
+	for _, id := range folderOwners {
+		if hash := m.itemPasswords[id]; !hash.empty() {
+			return id
+		}
+	}
+	return ""
+}
+
+// EffectiveItemAccess selects and checks one current owner under the same
+// policy lock. Callers supply folder aliases in specificity order. No password
+// state is cached, so changes apply to the next chunk of an active transfer.
+func (m *Manager) EffectiveItemAccess(sessionID, ip, fileID string, folderOwners []string) (ownerID string, protected, allowed bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ip = normalIP(ip)
+	ownerID = m.effectiveOwnerLocked(fileID, folderOwners)
+	protected = ownerID != ""
+	if m.authorizeLocked(sessionID, ip).Status != "allowed" {
+		return ownerID, protected, false
+	}
+	if !protected {
+		return ownerID, false, true
+	}
+	s := m.sessions[sessionID]
+	return ownerID, true, s != nil && s.IP == ip && time.Now().Before(s.Expires) && s.Grants[ownerID]
+}
+
+func (m *Manager) UnlockEffective(sessionID, ip, fileID string, folderOwners []string, password string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ip = normalIP(ip)
+	if m.authorizeLocked(sessionID, ip).Status != "allowed" {
+		return "", errors.New("el acceso a la página no está autorizado")
+	}
+	s := m.sessions[sessionID]
+	if s == nil || s.IP != ip || time.Now().After(s.Expires) {
+		return "", errors.New("recarga la página para iniciar una sesión")
+	}
+	ownerID := m.effectiveOwnerLocked(fileID, folderOwners)
+	if ownerID == "" {
+		return "", nil
+	}
+	if !m.allowAttemptLocked("item:" + ip) {
+		return ownerID, ErrRateLimited
+	}
+	if !m.itemPasswords[ownerID].matches(password) {
+		return ownerID, ErrPassword
+	}
+	s.Grants[ownerID] = true
+	return ownerID, nil
+}
 func (m *Manager) Unlock(sessionID, ip, id, password string) error {
 	m.mu.Lock()
 	ip = normalIP(ip)

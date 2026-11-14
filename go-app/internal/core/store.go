@@ -70,14 +70,72 @@ type Totals struct {
 	Bytes int64
 }
 
+// ProtectionOwner identifies a folder exposing a concrete file. The index
+// covers every alias, independently of which Entry a download lookup returns.
+type ProtectionOwner struct {
+	ID         string
+	Name       string
+	PathLength int
+}
+
 // Store is a concurrency-safe collection of shared items.
 type Store struct {
-	mu       sync.RWMutex
-	items    []*Item
-	lastScan time.Time
-	excluded map[string]int
+	mu               sync.RWMutex
+	items            []*Item
+	lastScan         time.Time
+	excluded         map[string]int
+	protectionOwners map[string][]ProtectionOwner
 
 	onChange func()
+}
+
+func (s *Store) rebuildProtectionOwnersLocked() {
+	owners := make(map[string][]ProtectionOwner)
+	folders := make(map[string][]ProtectionOwner)
+	for _, item := range s.items {
+		if item.Kind != KindFolder {
+			continue
+		}
+		owner := ProtectionOwner{ID: item.ID, Name: item.Name, PathLength: len(filepath.Clean(item.Path))}
+		key := exclusionKey(item.Path)
+		folders[key] = append(folders[key], owner)
+	}
+	// Walk each concrete file's ancestry once. This includes a newly added
+	// loose file inside a protected folder even before that folder's next
+	// throttled rescan discovers the file itself.
+	seen := make(map[string]bool)
+	for _, item := range s.items {
+		for _, entry := range item.entries {
+			if seen[entry.ID] {
+				continue
+			}
+			seen[entry.ID] = true
+			for parent := filepath.Dir(entry.Path); ; parent = filepath.Dir(parent) {
+				owners[entry.ID] = append(owners[entry.ID], folders[exclusionKey(parent)]...)
+				if filepath.Dir(parent) == parent {
+					break
+				}
+			}
+		}
+	}
+	for id, list := range owners {
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].PathLength != list[j].PathLength {
+				return list[i].PathLength > list[j].PathLength
+			}
+			return list[i].ID < list[j].ID
+		})
+		owners[id] = list
+	}
+	s.protectionOwners = owners
+}
+
+// ProtectionOwners returns folder aliases, most specific first, with a stable
+// ID tie break. Password changes are intentionally not cached by the Store.
+func (s *Store) ProtectionOwners(id string) []ProtectionOwner {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]ProtectionOwner(nil), s.protectionOwners[id]...)
 }
 
 // NewStore returns an empty store. onChange, if non-nil, is called after every
@@ -94,6 +152,14 @@ func exclusionKey(path string) string {
 	return key
 }
 func (s *Store) excludedLocked(path string) bool { return s.excluded[exclusionKey(path)] > 0 }
+
+// Excluded is an O(1) check for handlers retaining an Entry from an earlier
+// snapshot. Such entries must not expose a newly receiving destination.
+func (s *Store) Excluded(path string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.excludedLocked(path)
+}
 
 // ExcludePath prevents a receiving file from becoming public through either
 // direct file items or automatic rescans of a shared parent folder. The
@@ -204,6 +270,9 @@ func (s *Store) AddPaths(paths []string) (int, error) {
 		s.items = append(s.items, item)
 		existing[abs] = true
 		added++
+	}
+	if added > 0 {
+		s.rebuildProtectionOwnersLocked()
 	}
 	s.mu.Unlock()
 
@@ -348,6 +417,7 @@ func (s *Store) Rescan(force bool) {
 			changed = true
 		}
 	}
+	s.rebuildProtectionOwnersLocked()
 	s.mu.Unlock()
 
 	if changed {
@@ -379,6 +449,9 @@ func (s *Store) Remove(ids []string) int {
 		kept = append(kept, item)
 	}
 	s.items = kept
+	if removed > 0 {
+		s.rebuildProtectionOwnersLocked()
+	}
 	s.mu.Unlock()
 
 	if removed > 0 {
@@ -392,6 +465,7 @@ func (s *Store) Clear() {
 	s.mu.Lock()
 	had := len(s.items) > 0
 	s.items = nil
+	s.protectionOwners = nil
 	s.mu.Unlock()
 	if had {
 		s.notify()

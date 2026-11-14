@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Exercise sharing/security/upload flows through two real Windows WebView2 pages.
 // Requires Windows, Go from go.mod, WebView2 and Node.js >= 22.
-// Run from any directory: node go-app/scripts/test-windows-ui.mjs
+// Run from any directory: node go-app/scripts/test-sharing-features.mjs
 // Test-only Go overlays leave the application sources and module cache intact.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -253,6 +253,11 @@ try {
     await admin.evaluate("document.querySelector('#settings-form').requestSubmit(); true");
     await pageHas(admin, "!document.querySelector('#settings-dialog').open", 'settings save');
   }
+  async function openSettings(tab) {
+    await admin.evaluate("document.querySelector('#btn-settings').click(); true");
+    await pageHas(admin, "document.querySelector('#settings-dialog').open", 'settings data and dialog readiness');
+    if (tab) await admin.evaluate(`document.querySelector(${JSON.stringify('#tab-' + tab)}).click(); true`);
+  }
   async function submitPagePassword(password, name = 'Browser visitor') {
     await evaluate(recipient, `
       const form = document.querySelector('.gate form');
@@ -266,7 +271,8 @@ try {
   phase = 'default theme and synchronized settings';
   await pageHas(admin, "document.documentElement.dataset.theme === 'light'", 'default desktop light theme');
   await pageHas(recipient, "document.documentElement.dataset.theme === 'light'", 'default public light theme');
-  await admin.evaluate("document.querySelector('#btn-settings').click(); document.querySelector('#setting-theme').value='dark'; document.querySelector('#setting-theme').dispatchEvent(new Event('change',{bubbles:true})); true");
+  await openSettings('general');
+  await admin.evaluate("document.querySelector('#setting-theme').value='dark'; document.querySelector('#setting-theme').dispatchEvent(new Event('change',{bubbles:true})); true");
   await saveSettings();
   await pageHas(admin, "document.documentElement.dataset.theme === 'dark'", 'desktop dark theme');
   await pageHas(recipient, "document.documentElement.dataset.theme === 'dark'", 'public theme synchronization');
@@ -292,9 +298,50 @@ try {
   await pageHas(admin, "!document.querySelector('#edit-dialog').open", 'item password saved');
   console.log('PASS real context menu protects an individual file');
 
-  phase = 'page password, approvals and receiving settings';
+  phase = 'folder password context menu and inherited protection';
+  const folderItem = (await state()).items.find(item => item.kind === 'folder' && item.name === 'shared-folder');
+  assert.ok(folderItem, 'Fixture did not create a folder item');
   await evaluate(admin, `
-    document.querySelector('#btn-settings').click(); document.querySelector('#tab-security').click();
+    const row=[...document.querySelectorAll('#items-list .item')].find(row=>row.textContent.includes('shared-folder'));
+    if (!row) throw new Error('Missing shared-folder row');
+    row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:220}));
+    const button=[...document.querySelectorAll('#item-menu button')].find(button=>button.textContent.startsWith('Proteger'));
+    if (!button) throw new Error('Missing folder protect action'); button.click();
+    document.querySelector('#edit-input').value='folder-test-secret';
+    document.querySelector('#edit-form').requestSubmit(); return true;
+  `);
+  await waitFor('folder marked protected in host state', async () => (await state()).items.find(item => item.id === folderItem.id)?.protected);
+  await pageHas(admin, "!document.querySelector('#edit-dialog').open", 'folder password saved');
+  const protectedFolderManifest = await evaluate(recipient, "return await (await fetch('api/manifest')).json();");
+  const protectedFolder = protectedFolderManifest.folders.find(folder => folder.id === folderItem.id);
+  const folderFile = protectedFolderManifest.files.find(file => file.name === 'folder-note.txt');
+  assert.ok(protectedFolder?.protected && protectedFolder.locked, 'Public folder does not require its password');
+  assert.equal(folderFile.ownerId, folderItem.id, 'Folder child is owned by an unrelated file/alias');
+  assert.ok(folderFile.protected && folderFile.locked, 'Folder child did not inherit folder protection');
+  assert.equal(folderFile.protectionKind, 'folder');
+  assert.equal(folderFile.protectionName, 'shared-folder');
+  await pageHas(recipient, "!!document.querySelector('button[aria-label=\"Desbloquear folder-note.txt\"]')", 'protected folder child in recipient DOM');
+  await recipient.evaluate("document.querySelector('button[aria-label=\"Desbloquear folder-note.txt\"]').click(); true");
+  await pageHas(recipient, "document.querySelector('#unlock-dialog').open && document.querySelector('#unlock-title').textContent === 'Desbloquear carpeta' && document.querySelector('#unlock-name').textContent === 'shared-folder'", 'effective folder password dialog labels');
+  await recipient.evaluate("document.querySelector('#unlock-cancel').click(); true");
+  await evaluate(admin, `
+    const row=[...document.querySelectorAll('#items-list .item')].find(row=>row.textContent.includes('shared-folder'));
+    row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:220}));
+    const button=[...document.querySelectorAll('#item-menu button')].find(button=>button.textContent.startsWith('Quitar contraseña'));
+    if (!button) throw new Error('Missing remove folder password action'); button.click();
+    if (!document.querySelector('#edit-dialog').open) throw new Error('Missing folder password removal confirmation');
+    document.querySelector('#edit-form').requestSubmit(); return true;
+  `);
+  await waitFor('folder password removed in host state', async () => (await state()).items.find(item => item.id === folderItem.id)?.protected === false);
+  await pageHas(admin, "!document.querySelector('#edit-dialog').open", 'folder password removal confirmed');
+  await pageHas(recipient, "!!document.querySelector('a[aria-label=\"Descargar folder-note.txt\"]')", 'folder download restored after password removal');
+  assert.equal((await state()).items.find(item => item.name === 'private.txt').protected, true,
+    'Removing the folder password also removed an unrelated file password');
+  console.log('PASS folder context menu protection, inherited child owner/lock, and confirmed password removal');
+
+  phase = 'page password, approvals and receiving settings';
+  await openSettings('security');
+  await evaluate(admin, `
     const password=document.querySelector('#setting-password'); password.value=${JSON.stringify(pagePassword)};
     password.dispatchEvent(new Event('input',{bubbles:true}));
     document.querySelector('#setting-approval').checked=true;
@@ -327,6 +374,8 @@ try {
   const protectedManifest = await evaluate(recipient, "return await (await fetch('api/manifest')).json();");
   const protectedFile = protectedManifest.files.find(file => file.name === 'private.txt');
   assert.ok(protectedFile?.locked && protectedFile.protected, 'Public manifest did not protect private.txt');
+  assert.equal(protectedFile.protectionKind, 'file');
+  assert.equal(protectedFile.protectionName, 'private.txt');
   const deniedDownload = await evaluate(recipient, `
     const response=await fetch('api/download/'+${JSON.stringify(protectedFile.id)});
     return {status:response.status,body:await response.text()};
@@ -371,7 +420,7 @@ try {
   console.log('PASS browser File/DataTransfer/XHR upload saves exact bytes and appears in host state/UI/statistics');
 
   phase = 'history naming and IP blocking';
-  await admin.evaluate("document.querySelector('#btn-settings').click(); document.querySelector('#tab-history').click(); true");
+  await openSettings('history');
   await pageHas(admin, "[...document.querySelectorAll('#history-list .history-row')].some(row=>row.textContent.includes('127.0.0.1'))", 'persistent visitor history row');
   await clickText(admin, '#history-list .history-row button', 'Nombre');
   await admin.evaluate("document.querySelector('#edit-input').value='Recipient test name'; document.querySelector('#edit-form').requestSubmit(); true");

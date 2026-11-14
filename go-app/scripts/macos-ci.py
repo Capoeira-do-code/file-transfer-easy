@@ -49,6 +49,8 @@ def prepare(source, directory):
             if name.is_absolute() or ".." in name.parts:
                 raise ValueError("Unsafe source archive path")
             path = directory.joinpath(*name.parts)
+            if not path.resolve().is_relative_to(directory.resolve()):
+                raise ValueError("Source archive path escapes the staging directory")
             if entry.is_dir():
                 path.mkdir(parents=True, exist_ok=True)
             else:
@@ -105,6 +107,8 @@ class GitHub:
         headers = {"Accept": "application/vnd.github+json", "Authorization": "Bearer " + self.token,
                    "User-Agent": "FileTransferEasy-Build", "X-GitHub-Api-Version": "2022-11-28"}
         payload = json.dumps(data).encode() if data is not None else None
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
         req = urllib.request.Request("https://api.github.com" + path, data=payload, headers=headers, method=method)
         with self.opener.open(req, timeout=30) as response:
             raw = response.read()
@@ -126,7 +130,7 @@ class GitHub:
         raise RuntimeError("Artifact endpoint did not return its signed download")
 
 
-def submit(directory, repository, branch, mode):
+def submit(directory, repository, branch, mode, update_branch=False):
     plan, manifest = verified(directory)
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("Repository must use owner/name")
@@ -153,6 +157,8 @@ def submit(directory, repository, branch, mode):
         save(directory, plan)
     if bool(repo["private"]) != (mode == "private"):
         raise ValueError("Repository visibility differs from the selected mode")
+    if mode == "public-branch" and branch == repo["default_branch"]:
+        raise ValueError("The public repository's default branch must not change")
     if plan.get("repository") not in (None, repository) or plan.get("branch") not in (None, branch):
         raise ValueError("Staging directory is already associated with another remote target")
     plan.update(repository=repository, branch=branch, mode=mode)
@@ -170,7 +176,7 @@ def submit(directory, repository, branch, mode):
         if mode == "public-branch":
             # Preserve normal ancestry without checking out over the reviewed
             # staging files. read-tree seeds only the index from origin's base.
-            git("fetch", "--depth=1", "origin", repo["default_branch"])
+            git("fetch", "--depth=1", "origin", branch if update_branch else repo["default_branch"])
             git("reset", "--soft", "FETCH_HEAD")
             git("read-tree", "HEAD")
             previous = git("ls-tree", "-r", "--name-only", "HEAD", "--", "go-app", capture=True).stdout.splitlines()
@@ -183,7 +189,10 @@ def submit(directory, repository, branch, mode):
     try:
         existing = api.request("/repos/" + repository + "/git/ref/heads/" + urllib.parse.quote(branch, safe=""))
         if existing["object"]["sha"] != commit:
-            raise ValueError("Remote branch already exists with different content; no overwrite performed")
+            if not update_branch:
+                raise ValueError("Remote branch already exists; explicitly select --update-branch for a fast-forward")
+            git("merge-base", "--is-ancestor", existing["object"]["sha"], commit)
+            git("push", "origin", "HEAD:refs/heads/" + branch)
     except urllib.error.HTTPError as error:
         if error.code != 404:
             raise
@@ -226,6 +235,20 @@ def status(directory):
     print(json.dumps({"run_id": run["id"], "url": run["html_url"], "status": run["status"],
                       "conclusion": run["conclusion"], "jobs": [{"name": job["name"], "status": job["status"],
                       "conclusion": job["conclusion"], "id": job["id"]} for job in jobs]}, indent=2))
+
+
+def cancel(directory):
+    plan, _ = verified(directory)
+    api = GitHub()
+    repository, run_id = plan["repository"], plan["run_id"]
+    run = api.request(f"/repos/{repository}/actions/runs/{run_id}")
+    if run["head_sha"] != plan["commit"]:
+        raise ValueError("Workflow run does not belong to this reviewed snapshot")
+    if run["status"] != "completed":
+        api.request(f"/repos/{repository}/actions/runs/{run_id}/cancel", {}, method="POST")
+    plan["cancelled_superseded_run"] = run_id
+    save(directory, plan)
+    print(json.dumps({"cancelled_run": run_id, "url": run["html_url"]}))
 
 
 def download(directory, output):
@@ -271,7 +294,10 @@ command.add_argument("--directory", type=Path, required=True)
 command.add_argument("--repository", required=True)
 command.add_argument("--branch", required=True)
 command.add_argument("--mode", choices=("private", "public-branch"), required=True)
+command.add_argument("--update-branch", action="store_true", help="Fast-forward the selected build branch; never force push")
 command = commands.add_parser("status", help="Read-only workflow status")
+command.add_argument("--directory", type=Path, required=True)
+command = commands.add_parser("cancel", help="Cancel only this snapshot's superseded workflow run")
 command.add_argument("--directory", type=Path, required=True)
 command = commands.add_parser("download", help="Download and verify the completed DMG artifact")
 command.add_argument("--directory", type=Path, required=True)
@@ -280,8 +306,10 @@ args = parser.parse_args()
 if args.command == "prepare":
     prepare(args.source.resolve(), args.directory.resolve())
 elif args.command == "submit":
-    submit(args.directory.resolve(), args.repository, args.branch, args.mode)
+    submit(args.directory.resolve(), args.repository, args.branch, args.mode, args.update_branch)
 elif args.command == "status":
     status(args.directory.resolve())
+elif args.command == "cancel":
+    cancel(args.directory.resolve())
 else:
     download(args.directory.resolve(), args.output.resolve())

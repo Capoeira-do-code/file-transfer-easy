@@ -7,7 +7,7 @@ let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let adapter = """
 var window = this;
 var navigator = {userAgent:'Macintosh'};
-var requests = [], timers = [];
+var requests = [], timers = [], stateRequests = [];
 function setTimeout(f) { timers.push(f); return timers.length; }
 function clearTimeout() {}
 function setInterval() { return 1; }
@@ -62,7 +62,7 @@ window.addEventListener=function(){};window.innerWidth=1040;window.innerHeight=7
 window.location={pathname:'/s/fixture/'};
 window.__FTE_TOKEN__='fixture';window.__FTE_BASE__='/s/fixture';
 function EventSource(){this.readyState=1;}EventSource.prototype.addEventListener=function(){};EventSource.prototype.close=function(){};
-function fetch(path,opts){requests.push({path:path,opts:opts});return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve(path.indexOf('/manifest')>=0?__manifest:path.indexOf('/api/access')>=0?__access:path==='/api/state'?__state:{ok:true});},blob:function(){return Promise.resolve({});}});}
+function fetch(path,opts){requests.push({path:path,opts:opts});if(typeof __deferState!=='undefined'&&__deferState&&path==='/api/state')return new Promise(function(resolve,reject){stateRequests.push({resolve:resolve,reject:reject});});return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve(path.indexOf('/manifest')>=0?__manifest:path.indexOf('/api/access')>=0?__access:path==='/api/state'?__state:{ok:true});},blob:function(){return Promise.resolve({});}});}
 function assert(ok,message){if(!ok)throw Error(message);}
 function byId(id){return document.querySelector('#'+id);}
 """
@@ -74,15 +74,18 @@ func run(_ directory: String, _ status: String, _ checks: String) throws {
  guard let ctx = JSContext() else { fatalError("JavaScriptCore unavailable") }
  ctx.exceptionHandler = { _, value in failure = value?.toString() }
  ctx.setObject(try String(contentsOf: root.appendingPathComponent("\(directory)/index.html"), encoding:.utf8), forKeyedSubscript:"__html" as NSString)
- let state: [String: Any] = ["items":(status == "empty" || status == "receiving" || status == "error-empty") ? [] : [item],"totals":["items":1,"files":1,"bytesText":"36 B"],"share":["status":status == "empty" ? "idle" : status == "receiving" ? "live" : status == "error-empty" ? "error" : status,"url":(status == "live" || status == "receiving") ? "https://fixture.trycloudflare.com/s/token" : "","lanUrl":status == "error" ? "http://192.0.2.1/s/token" : "","error":(status == "error" || status == "error-empty") ? "fixture failure" : ""],"visitors":[],"transfers":[],"stats":[:],"log":[],"settings":["theme":"light","uploadsEnabled":status == "receiving","maxUploadMB":100,"pageTitle":"Archivos compartidos","pagePasswordSet":false],"history":[["id":"history-one","ip":"192.0.2.24","name":"Ana","label":"Chrome · Windows","visits":2,"downloads":1,"bytesText":"36 B","blocked":false]],"requests":status == "request" ? [["id":"request-one","ip":"192.0.2.24","name":"Ana","status":"pending"]] : []]
+ let state: [String: Any] = ["items":(status == "empty" || status == "receiving" || status == "error-empty") ? [] : [item],"totals":["items":1,"files":1,"bytesText":"36 B"],"share":["status":status == "empty" ? "idle" : status == "receiving" ? "live" : status == "error-empty" ? "error" : status,"url":(status == "live" || status == "receiving") ? "https://fixture.trycloudflare.com/s/token" : "","lanUrl":status == "error" ? "http://192.0.2.1/s/token" : "","error":(status == "error" || status == "error-empty") ? "fixture failure" : ""],"visitors":[],"transfers":[],"stats":[:],"log":[],"settings":["theme":"light","uploadsEnabled":status == "receiving","maxUploadMB":100,"uploadDir":"/tmp/fixture-uploads","pageTitle":"Archivos compartidos","pagePasswordSet":false],"history":[["id":"history-one","ip":"192.0.2.24","name":"Ana","label":"Chrome · Windows","visits":2,"downloads":1,"bytesText":"36 B","blocked":false]],"requests":status == "request" ? [["id":"request-one","ip":"192.0.2.24","name":"Ana","status":"pending"]] : []]
  ctx.setObject(state, forKeyedSubscript:"__state" as NSString)
  var scenarioManifest = manifest
+ if status == "file-owner" { scenarioManifest["files"] = [["id":"one","name":"privado.txt","folder":"Documentos","protectionName":"privado.txt","protectionKind":"file","size":36,"sizeText":"36 B","ext":"txt","locked":true,"protected":true]] }
  if status == "locked" { scenarioManifest["files"] = [["id":"one","name":"privado.txt","size":36,"sizeText":"36 B","ext":"txt","locked":true,"protected":true]] }
  ctx.setObject(scenarioManifest, forKeyedSubscript:"__manifest" as NSString)
  ctx.setObject(["status":status == "password" ? "password" : status == "pending" ? "pending" : "allowed","theme":"light","uploadsEnabled":false], forKeyedSubscript:"__access" as NSString)
+ ctx.setObject(status == "settings-loading" || status == "settings-failure", forKeyedSubscript:"__deferState" as NSString)
  ctx.evaluateScript(adapter)
  if failure == nil { ctx.evaluateScript(try String(contentsOf:root.appendingPathComponent("\(directory)/app.js"),encoding:.utf8)) }
  if failure == nil { ctx.evaluateScript(checks) }
+ if failure == nil { ctx.evaluateScript("if(typeof __afterJobs === 'function') __afterJobs();") }
  if let error = failure { fputs("FAIL \(directory)/\(status): \(error)\n",stderr);exit(1) }
  print("PASS \(directory)/\(status)")
 }
@@ -182,6 +185,38 @@ byId('history-list').querySelectorAll('button')[0].emit('click');
 byId('edit-input').value='Ana oficina';byId('edit-form').emit('submit',{preventDefault:function(){}});
 var rename=JSON.parse(requests.filter(function(r){return r.path==='/api/visitors/name';}).pop().opts.body);
 assert(rename.ip==='192.0.2.24'&&rename.name==='Ana oficina','history rename request incorrect');
+""")
+
+try run("frontend","settings-loading","""
+assert(stateRequests.length===1,'initial state request was not deferred');
+byId('btn-settings').emit('click');
+assert(!byId('settings-dialog').open,'settings opened before its snapshot arrived');
+assert(byId('btn-settings').disabled,'settings opener did not mark its pending request');
+assert(stateRequests.length===2,'settings opener did not request a complete snapshot');
+stateRequests[1].resolve({ok:true,status:200,json:function(){return Promise.resolve(__state);}});
+function __afterJobs(){
+ assert(byId('settings-dialog').open,'settings did not open after the snapshot arrived');
+ assert(byId('setting-upload-dir').value===__state.settings.uploadDir,'settings opened with an invented empty upload directory');
+ assert(byId('setting-title').value===__state.settings.pageTitle,'settings title was lost during startup');
+ assert(!byId('btn-settings').disabled,'settings opener remained disabled after success');
+}
+""")
+try run("frontend","settings-failure","""
+byId('btn-settings').emit('click');
+stateRequests[1].reject(new Error('HTTP 503'));
+function __afterJobs(){
+ assert(!byId('settings-dialog').open,'settings opened with missing backend data after an error');
+ assert(!byId('btn-settings').disabled,'settings opener cannot be retried after failure');
+ assert(byId('toasts').textContent.indexOf('HTTP 503')>=0,'settings opener hid the specific failure reason');
+ assert(stateRequests.length===2,'settings opener retried recursively');
+}
+""")
+
+try run("public","file-owner","""
+var unlock=byId('stage').querySelector('.unlock-button');assert(unlock,'grouped protected file lacks unlock action');
+unlock.emit('click');
+assert(byId('unlock-title').textContent==='Desbloquear archivo','folder grouping incorrectly labeled a file password as a folder password');
+assert(byId('unlock-name').textContent==='privado.txt','unlock dialog did not use the effective protection owner name');
 """)
 
 func luminance(_ hex: String) -> Double {

@@ -924,7 +924,7 @@
       .then(apply)
       .catch(function (error) {
         toast('No se pudo cargar el estado de la aplicación' + (error && error.message ? ': ' + error.message : ''), 'error');
-        apply({ items: [] });
+        if (!state || !state.settings) apply({ items: [] });
       });
   }
 
@@ -933,7 +933,7 @@
    * ------------------------------------------------------------------ */
 
   /* Settings, access decisions and file actions stay on the guarded UI API. */
-  var settingsTab = 'general', passwordChanged = false, passwordCleared = false;
+  var settingsTab = 'general', passwordChanged = false, passwordCleared = false, settingsOpening = false;
   var menuReturnFocus = null, editAction = null, editReturnFocus = null, editVersion = 0;
   var seenRequests = Object.create(null), didSeeRequests = false;
 
@@ -1047,7 +1047,33 @@
     }
   }
   function openSettings() {
-    var settings = (state && state.settings) || {};
+    if (state && state.settings) { showSettings(state.settings); return; }
+    if (settingsOpening) return;
+    settingsOpening = true;
+    var button = $('#btn-settings');
+    button.disabled = true; attr(button, 'aria-busy', 'true');
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
+    fetch('/api/state', { headers: { 'X-FTE-Token': TOKEN }, signal: controller ? controller.signal : undefined })
+      .then(function (response) {
+        return response.json().catch(function () {
+          throw new Error(response.ok ? 'La aplicación devolvió una respuesta no válida' : 'HTTP ' + response.status);
+        }).then(function (snapshot) {
+          if (!response.ok) throw new Error(snapshot.error || 'HTTP ' + response.status);
+          if (!snapshot.settings || typeof snapshot.settings !== 'object') throw new Error('La respuesta no contiene la configuración de la aplicación');
+          apply(snapshot);
+          showSettings(snapshot.settings);
+        });
+      })
+      .catch(function (error) {
+        toast('No se pudo abrir la configuración: ' + (error.name === 'AbortError' ? 'la aplicación tardó demasiado en responder' : error.message || 'no se recibió una respuesta válida'), 'error');
+      })
+      .then(function () {
+        clearTimeout(timer); settingsOpening = false; button.disabled = false; attr(button, 'aria-busy', null);
+      });
+  }
+
+  function showSettings(settings) {
     $('#setting-theme').value = settings.theme === 'dark' ? 'dark' : 'light';
     $('#setting-title').value = settings.pageTitle || '';
     $('#setting-approval').checked = !!settings.requireApproval;

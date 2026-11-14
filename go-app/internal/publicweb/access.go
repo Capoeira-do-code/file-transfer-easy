@@ -186,8 +186,36 @@ func (s *Server) ownerID(entry core.Entry) string {
 	}
 	return entry.ID
 }
+
+func (s *Server) effectiveProtection(r *http.Request, entry core.Entry) (ownerID, name, kind string, protected, allowed bool) {
+	if s.store.Excluded(entry.Path) {
+		return s.ownerID(entry), "", "", false, false
+	}
+	if s.access == nil {
+		return s.ownerID(entry), "", "", false, true
+	}
+	owners := s.store.ProtectionOwners(entry.ID)
+	ids := make([]string, len(owners))
+	for i, owner := range owners {
+		ids[i] = owner.ID
+	}
+	ownerID, protected, allowed = s.access.EffectiveItemAccess(s.sessionID(r), clientIP(r), entry.ID, ids)
+	if !protected {
+		return s.ownerID(entry), "", "", false, allowed
+	}
+	if ownerID == entry.ID {
+		return ownerID, entry.Name, "file", true, allowed
+	}
+	for _, owner := range owners {
+		if owner.ID == ownerID {
+			return ownerID, owner.Name, "folder", true, allowed
+		}
+	}
+	return ownerID, entry.Name, "file", true, allowed
+}
 func (s *Server) itemAllowed(r *http.Request, entry core.Entry) bool {
-	return s.access == nil || s.access.ItemAllowed(s.sessionID(r), clientIP(r), s.ownerID(entry))
+	_, _, _, _, allowed := s.effectiveProtection(r, entry)
+	return allowed
 }
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
@@ -207,9 +235,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, ok := s.store.Entry(body.ID)
 	owner := body.ID
-	if ok {
-		owner = s.ownerID(entry)
-	} else {
+	if !ok {
 		found := false
 		for _, item := range s.store.Items() {
 			if item.ID == body.ID {
@@ -223,7 +249,18 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.access != nil {
-		if err := s.access.Unlock(s.sessionID(r), clientIP(r), owner, body.Password); err != nil {
+		var err error
+		if ok {
+			owners := s.store.ProtectionOwners(entry.ID)
+			ids := make([]string, len(owners))
+			for i, candidate := range owners {
+				ids[i] = candidate.ID
+			}
+			owner, err = s.access.UnlockEffective(s.sessionID(r), clientIP(r), entry.ID, ids, body.Password)
+		} else {
+			err = s.access.Unlock(s.sessionID(r), clientIP(r), owner, body.Password)
+		}
+		if err != nil {
 			code := http.StatusUnauthorized
 			if errors.Is(err, access.ErrRateLimited) {
 				code = http.StatusTooManyRequests

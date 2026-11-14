@@ -1,5 +1,41 @@
 # Validación
 
+## Ajustes y transferencias 1.1.0 — 14 de noviembre de 2026
+
+- `go test ./...` y `go vet ./...`: ajustes persistentes, protección de página
+  y de archivos/carpetas, revocación de permisos, solicitudes, bloqueo de IP,
+  historial y subidas. Las rutas administrativas requieren el token local.
+- `node scripts/test-windows-ui.mjs`: carga con asociaciones MIME incorrectas,
+  un solo tray, iconos nativos, reapertura y recuperación de WebView2.
+- `node scripts/test-sharing-features.mjs`: dos WebView2 y servidor real en
+  loopback. Tema claro inicial y sincronización del oscuro, configuración,
+  contraseñas, aceptar/rechazar, descargas protegidas, subida con comparación de
+  bytes, nombres del historial y bloqueo/desbloqueo. No inicia un túnel.
+- `FTE_E2E=1 go test ./internal/app -run EndToEnd -v -timeout 5m`: Cloudflare
+  real, descarga y ZIP, cookie HTTPS, contraseña incorrecta, aprobación,
+  desbloqueo y subida multipart. El contenido recibido coincide byte a byte;
+  se usan archivos sintéticos y el túnel se cierra al terminar.
+- Escenarios del adaptador `scripts/test-ui.swift` ejecutados también en Node:
+  estados de conexión y errores, ajustes, recepción sin archivos, solicitudes,
+  historial, menús y protección. Abrir ajustes antes de recibir el estado
+  inicial espera la configuración; un error transitorio conserva el último estado válido.
+- Capturas de WebView2: escritorio vacío/activo, ajustes por pestañas y menús,
+  página pública y acceso con contraseña/solicitud, claro/oscuro y móvil de
+  390 px. Sin desbordamiento horizontal en las vistas comprobadas.
+- Las subidas comprueban autorización durante la recepción y el commit,
+  límites, nombres, enlaces y ausencia de sobrescritura. Los destinos en
+  preparación quedan excluidos de las carpetas compartidas hasta completarse.
+- Los errores muestran el motivo concreto, incluidas las comprobaciones
+  previas a la descarga y ZIP. El HTML público no contiene los avisos retirados
+  sobre mantener encendido el equipo o abierta la aplicación.
+
+El detector de carreras no pudo iniciarse en este escritorio Windows con el
+toolchain auxiliar (ThreadSanitizer, error de asignación de memoria 87). El
+workflow de compilación incluye la comprobación `-race` en Ubuntu.
+
+Los paquetes versionados, sus SHA-256 y las instrucciones de compilación están
+descritos en [BUILDING.md](BUILDING.md).
+
 ## Interfaz e iconos de Windows 1.0.3 — 14 de noviembre de 2026
 
 - Interfaz de escritorio con superficies neutras, acento azul, tipografía del

@@ -96,16 +96,18 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 // --------------------------------------------------------------- the manifest
 
 type manifestFile struct {
-	OwnerID      string `json:"ownerId"`
-	Protected    bool   `json:"protected"`
-	Locked       bool   `json:"locked"`
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Ext          string `json:"ext"`
-	Size         int64  `json:"size"`
-	SizeText     string `json:"sizeText"`
-	Folder       string `json:"folder"`
-	ModifiedText string `json:"modifiedText"`
+	ProtectionName string `json:"protectionName"`
+	ProtectionKind string `json:"protectionKind"`
+	OwnerID        string `json:"ownerId"`
+	Protected      bool   `json:"protected"`
+	Locked         bool   `json:"locked"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Ext            string `json:"ext"`
+	Size           int64  `json:"size"`
+	SizeText       string `json:"sizeText"`
+	Folder         string `json:"folder"`
+	ModifiedText   string `json:"modifiedText"`
 }
 
 type manifestFolder struct {
@@ -164,8 +166,9 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 
 	var total int64
 	for _, entry := range entries {
+		owner, name, kind, protected, allowed := s.effectiveProtection(r, entry)
 		payload.Files = append(payload.Files, manifestFile{
-			OwnerID: s.ownerID(entry), Protected: s.access != nil && s.access.ItemProtected(s.ownerID(entry)), Locked: !s.itemAllowed(r, entry),
+			OwnerID: owner, ProtectionName: name, ProtectionKind: kind, Protected: protected, Locked: !allowed,
 			ID:           entry.ID,
 			Name:         entry.Name,
 			Ext:          entry.Ext,
