@@ -1,0 +1,75 @@
+name: macOS build artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version X.Y.Z from the reviewed source snapshot
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: go-app
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-app/go.mod
+          cache-dependency-path: go-app/go.sum
+      - name: Validate version and source snapshot
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$VERSION" = "$(cat VERSION)"
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          root = pathlib.Path('..')
+          manifest = json.loads((root / 'BUILD-SNAPSHOT.json').read_text())
+          for name, expected in manifest['files'].items():
+              assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected, name
+          print('Source snapshot hashes verified')
+          PY
+      - run: go vet ./internal/...
+      - run: go test -race ./internal/...
+
+  macos:
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ inputs.version }}
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+      CGO_CFLAGS: '-mmacosx-version-min=13.0'
+      CGO_LDFLAGS: '-mmacosx-version-min=13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-app/go.mod
+          cache-dependency-path: go-app/go.sum
+      - name: Check frontend and native macOS integration
+        run: |
+          swift scripts/test-ui.swift
+          bash scripts/test-native-macos.sh
+          go run ./cmd/genicons
+          go test -race .
+      - name: Build universal app and verify disk image
+        run: bash scripts/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: |
+            go-app/dist/*.dmg
+            go-app/dist/*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 7

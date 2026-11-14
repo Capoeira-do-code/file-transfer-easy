@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -119,6 +120,35 @@ func TestAssetsAreServedFromRoot(t *testing.T) {
 	}
 	if got := do(t, server, http.MethodGet, "/no-existe.css", "", false).Code; got != http.StatusNotFound {
 		t.Errorf("un asset inexistente debería dar 404, dio %d", got)
+	}
+}
+
+func TestDesktopAssetsIgnorePlatformMIMETypes(t *testing.T) {
+	server, _, _ := newFixture(t)
+
+	// Windows file associations can override Go's MIME table. A desktop UI
+	// must still serve scripts and styles with types WebView2 accepts.
+	for _, asset := range []struct {
+		name, platformType, wantType string
+	}{
+		{"app.js", "text/csv", "text/javascript; charset=utf-8"},
+		{"app.css", "application/octet-stream", "text/css; charset=utf-8"},
+	} {
+		ext := filepath.Ext(asset.name)
+		previous := mime.TypeByExtension(ext)
+		if err := mime.AddExtensionType(ext, asset.platformType); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := mime.AddExtensionType(ext, previous); err != nil {
+				t.Error(err)
+			}
+		})
+
+		response := do(t, server, http.MethodGet, "/"+asset.name, "", false)
+		if got := response.Header().Get("Content-Type"); got != asset.wantType {
+			t.Errorf("GET /%s: Content-Type = %q; want %q", asset.name, got, asset.wantType)
+		}
 	}
 }
 

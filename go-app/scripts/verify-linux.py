@@ -4,7 +4,7 @@ from pathlib import Path
 import io, struct, tarfile, hashlib, subprocess, re
 import os
 root = Path(__file__).resolve().parent.parent / 'dist'
-version = os.environ.get('VERSION', '1.0.1')
+version = os.environ.get('VERSION', (root.parent / 'VERSION').read_text().strip())
 for arch, machine in [('amd64', 62), ('arm64', 183)]:
     prefix = f'FileTransferEasy-{version}-linux-{arch}'
     raw = (root / (prefix + '.deb')).read_bytes()

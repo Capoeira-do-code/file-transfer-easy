@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.0.1}"
+VERSION="${VERSION:-$(cat VERSION)}"
 ARCH="${ARCH:-$(go env GOARCH)}"
 case "$ARCH" in amd64|arm64) ;; *) echo "ARCH debe ser amd64 o arm64" >&2; exit 1 ;; esac
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION debe usar X.Y.Z" >&2; exit 1; }
@@ -21,5 +21,5 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/fte-linux.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 go run ./cmd/genicons
 CGO_ENABLED=1 GOOS=linux GOARCH="$ARCH" PKG_CONFIG="$PKG_CONFIG" \
-  go build -tags gtk3 -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$work/file-transfer-easy" .
+  go build -tags gtk3,production -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$work/file-transfer-easy" .
 python3 scripts/package-linux.py "$work/file-transfer-easy" "$VERSION" "$ARCH"

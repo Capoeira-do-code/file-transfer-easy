@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2217%22%20fill%3D%22%235850d9%22%2F%3E%3Cpath%20d%3D%22M32%2040V16m-10%2010%2010-10%2010%2010M13%2038v10a3%203%200%200%200%203%203h32a3%203%200%200%200%203-3V38%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
 <title>File Transfer Easy</title>
-<script>window.__FTE_TOKEN__="__FTE_TOKEN__";</script>
+<script>window.__FTE_TOKEN__="__FTE_TOKEN__";try{document.documentElement.dataset.theme=localStorage.getItem("fte-theme")==="dark"?"dark":"light";}catch(e){}</script>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -31,6 +31,10 @@
   <symbol id="i-tray" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v8.6"/><path d="M8.6 8.8l3.4 3.4 3.4-3.4"/><path d="M4.5 14.2v2.3A2.5 2.5 0 0 0 7 19h10a2.5 2.5 0 0 0 2.5-2.5v-2.3"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><path d="M4.6 6.5h.01M4.6 12h.01M4.6 17.5h.01"/></symbol>
   <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5l3.6 3.6L5 14.7"/><path d="M11.6 15.6h7"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 3-.6 2.2-2 .9-2-.7-2 3.4 1.6 1.6-.2 2.2L2 14l2 3.5 2.1-.6 1.8 1.3.3 2.3h4l.7-2.2 2-.9 2.1.7 2-3.5-1.6-1.6.2-2.2 1.8-1.4-2-3.4-2.2.6-1.8-1.3L13 3z"/><circle cx="10.5" cy="11.7" r="3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></symbol>
+  <symbol id="i-theme" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 4v16"/><path fill="currentColor" stroke="none" d="M12 4a8 8 0 0 1 0 16z"/></symbol>
 </svg>
 <div class="app">
   <header class="topbar" id="topbar">
@@ -39,29 +43,35 @@
       <span class="chip" id="reconnect" role="status" hidden><span class="chip-dot"></span>Reconectando…</span>
       <button type="button" class="btn btn-sm btn-ghost nodrag" id="btn-preview" disabled><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-reveal"/></svg>Vista pública</button>
       <button type="button" class="btn btn-sm btn-ghost nodrag" id="btn-hide" title="Ocultar la ventana y seguir compartiendo"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-tray"/></svg>Ocultar</button>
+      <button type="button" class="iconbtn btn-ghost nodrag" id="btn-theme" aria-label="Cambiar a tema oscuro" title="Cambiar tema"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-theme"/></svg></button>
+      <button type="button" class="iconbtn btn-ghost nodrag" id="btn-settings" aria-label="Configuración" title="Configuración"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-settings"/></svg></button>
     </div>
   </header>
   <main class="stage" id="stage" tabindex="-1">
-    <section class="empty" id="view-empty" hidden>
-      <div class="empty-intro"><span class="eyebrow">COMPARTIR</span><h1>Compartir archivos</h1><p>Añade archivos o carpetas para crear un enlace de descarga.</p></div>
+    <section id="request-panel" class="request-panel" aria-label="Solicitudes de acceso" hidden><div class="request-heading"><h2>Solicitudes de acceso</h2><span id="request-count" class="count"></span></div><ul id="request-list"></ul></section>
+    <section class="empty" id="view-empty">
+
       <div class="dropzone">
-        <div class="file-art" aria-hidden="true"><div class="art-sheet art-back"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder"/></svg></div><div class="art-sheet art-front"><svg class="ico" viewBox="0 0 24 24"><use href="#i-file"/></svg><span>TXT</span></div><span class="art-plus"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg></span></div>
-        <h2 class="empty-title">Arrastra archivos o carpetas</h2><p class="empty-sub" id="drop-hint">También puedes añadirlos desde el Dock o la barra de menús.</p>
         <div class="empty-actions">
-          <button type="button" class="btn btn-primary btn-lg" data-act="add-files"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Añadir archivos</span></button>
-          <button type="button" class="btn btn-lg" data-act="add-folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Añadir carpeta</span></button>
+          <button type="button" class="btn btn-primary" data-act="add-files"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Añadir archivos</span></button>
+          <button type="button" class="btn" data-act="add-folder"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Añadir carpeta</span></button>
+        </div>
+        <div class="empty-placeholder">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
+          <h2 class="empty-title">No hay archivos</h2>
+          <p class="empty-sub" id="drop-hint">Arrastra archivos o carpetas hasta esta lista.</p><button type="button" class="btn btn-primary receive-link" id="btn-receive" hidden>Crear enlace para recibir archivos</button>
         </div>
         <p class="shortcut-hint"><kbd class="k-mac">⌘ O</kbd><kbd class="k-win">Ctrl + O</kbd> para elegir archivos <span>·</span> <kbd class="k-mac">⇧ ⌘ O</kbd><kbd class="k-win">Ctrl + Mayús + O</kbd> para carpetas</p>
       </div>
 
-      <p class="session-note">Mantén el equipo encendido y la app abierta mientras compartes.</p>
+
     </section>
     <div class="content" id="view-active" hidden>
-      <div class="page-heading"><div><span class="eyebrow">COMPARTIR</span><h1>Archivos</h1></div><span class="session-badge"><span class="chip-dot"></span>Desde este equipo</span></div>
+
       <section class="linkcard" id="linkcard" aria-label="Enlace para compartir">
         <div class="linkcard-main">
-          <div class="linkcard-head"><span class="statuspill is-neutral" id="status-pill"><span class="statuspill-dot" aria-hidden="true"></span><span id="status-text" role="status">Listo</span></span><span class="since" id="share-since" hidden></span><button type="button" class="btn btn-sm btn-ghost" id="btn-share-toggle"><span class="btn-label">Compartir</span></button></div>
-          <h2 id="link-title">Preparando enlace</h2><p class="link-description" id="link-description">Comprobando la conexión.</p>
+          <div class="linkcard-head"><h2 id="link-title">Preparando enlace</h2><span class="statuspill is-neutral" id="status-pill"><span class="statuspill-dot" aria-hidden="true"></span><span id="status-text" role="status">Listo</span></span><span class="since" id="share-since" hidden></span><button type="button" class="btn btn-sm" id="btn-share-toggle"><span class="btn-label">Compartir</span></button></div>
+          <p class="link-description" id="link-description">Comprobando la conexión.</p>
           <div class="urlrow"><div class="urlpill" id="url-pill"><svg class="ico urlpill-ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-globe"/></svg><span class="urlpill-text mono" id="url-text" hidden></span><span class="urlpill-hint" id="url-hint">Preparando el enlace…</span><span class="skeleton" id="url-skeleton" aria-hidden="true" hidden></span></div><div class="urlactions"><button type="button" class="btn btn-primary btn-lg copybtn" id="btn-copy" disabled><svg class="ico ico-copy" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy"/></svg><svg class="ico ico-done" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg><span class="btn-label" id="copy-label">Copiar enlace</span></button><button type="button" class="iconbtn" id="btn-open" disabled title="Abrir enlace público" aria-label="Abrir enlace público"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-reveal"/></svg></button></div></div>
           <p class="errorbox" id="share-error" role="alert" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-alert"/></svg><span id="share-error-text"></span><button type="button" class="btn btn-sm" id="btn-retry">Reintentar</button></p>
           <div class="linkcard-foot" id="link-foot" hidden><span class="lanline" id="lan-line" hidden><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-wifi"/></svg><span>En la misma red</span><span class="mono" id="lan-url" tabindex="0"></span></span></div>
@@ -70,19 +80,58 @@
       </section>
       <div class="columns">
         <section class="panel panel-items" aria-label="Archivos compartidos">
-          <header class="panel-head"><div><h2 class="panel-title">Archivos compartidos</h2><p class="panel-meta" id="items-totals"></p></div><div class="panel-actions"><button type="button" class="btn btn-sm" data-act="add-files" title="Añadir archivos"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Archivos</span></button><button type="button" class="btn btn-sm btn-ghost" data-act="add-folder" title="Añadir carpeta"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Carpeta</span></button></div></header>
-          <ul class="list list-items scroller" id="items-list"></ul><footer class="panel-foot"><span>Se comparten desde su ubicación original.</span><button type="button" class="btn btn-sm btn-ghost" id="btn-clear"><span class="btn-label">Vaciar</span></button></footer>
+          <header class="panel-head"><div><h2 class="panel-title">Archivos</h2><p class="panel-meta" id="items-totals"></p></div><div class="panel-actions"><button type="button" class="btn btn-sm" data-act="add-files" title="Añadir archivos"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Añadir archivos</span></button><button type="button" class="btn btn-sm" data-act="add-folder" title="Añadir carpeta"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg><span class="spin" aria-hidden="true"></span><span class="btn-label">Añadir carpeta</span></button></div></header>
+          <ul class="list list-items scroller" id="items-list"></ul><p class="empty-line" id="items-none" hidden></p><footer class="panel-foot"><span id="security-summary"></span><button type="button" class="btn btn-sm btn-ghost" id="btn-clear"><span class="btn-label">Vaciar</span></button></footer>
         </section>
-        <section class="panel panel-activity" aria-label="Actividad de la sesión"><header class="panel-head"><h2 class="panel-title">Actividad</h2><span class="live-caption">En tiempo real</span></header><div class="subhead"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"/></svg><h3>Transferencias</h3><span class="count" id="tr-count">0</span></div><ul class="list list-transfers scroller" id="transfers-list"></ul><p class="empty-line" id="transfers-empty">Sin descargas</p><div class="subpanel"><div class="subhead"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-users"/></svg><h3>Visitantes</h3><span class="count" id="vi-count">0</span></div><ul class="list list-visitors scroller" id="visitors-list"></ul><p class="empty-line" id="visitors-empty">Sin visitantes</p></div></section>
+        <section class="panel panel-activity" aria-label="Actividad de la sesión"><header class="panel-head"><h2 class="panel-title">Actividad</h2></header><div class="subhead"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"/></svg><h3>Transferencias</h3><span class="count" id="tr-count">0</span></div><ul class="list list-transfers scroller" id="transfers-list"></ul><p class="empty-line" id="transfers-empty">Sin descargas</p><div class="subpanel"><div class="subhead"><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-users"/></svg><h3>Visitantes</h3><span class="count" id="vi-count">0</span></div><ul class="list list-visitors scroller" id="visitors-list"></ul><p class="empty-line" id="visitors-empty">Sin visitantes</p></div></section>
       </div>
       <section class="statbar" aria-label="Resumen de sesión"><span class="statbit"><strong id="st-downloads">0</strong> descargas</span><span class="statbit"><strong id="st-bytes">0 B</strong> enviados</span><span class="statbit"><strong id="st-visitors">0</strong> visitantes</span><span class="statbit"><strong id="st-active">0</strong> en curso</span></section>
       <details class="logbox" id="logbox"><summary><svg class="ico ico-sm" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-terminal"/></svg>Registro de la sesión<span class="count" id="log-count">0</span></summary><div class="loglines mono scroller" id="log-lines"></div></details>
-      <p class="session-note" id="active-session-note">Mantén el equipo encendido y la app abierta. Puedes ocultar la ventana y volver desde la barra de menús.</p>
+
     </div>
   </main>
 </div>
 <div class="veil" id="veil" aria-hidden="true"><div class="veil-inner"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus"/></svg><strong>Suelta para compartir</strong><span>Se añadirán a la lista</span></div></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<div id="item-menu" class="context-menu" role="menu" aria-label="Acciones del elemento" hidden></div>
+<dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+  <form id="settings-form">
+    <header class="dialog-head"><h2 id="settings-title">Configuración</h2><button type="button" class="iconbtn btn-ghost" id="settings-close" aria-label="Cerrar configuración">×</button></header>
+    <div class="settings-body">
+      <nav class="settings-tabs" role="tablist" aria-label="Secciones de configuración">
+        <button type="button" role="tab" id="tab-general" aria-controls="settings-general" aria-selected="true" data-settings-tab="general">General</button>
+        <button type="button" role="tab" id="tab-security" aria-controls="settings-security" aria-selected="false" tabindex="-1" data-settings-tab="security">Seguridad</button>
+        <button type="button" role="tab" id="tab-receiving" aria-controls="settings-receiving" aria-selected="false" tabindex="-1" data-settings-tab="receiving">Recepción</button>
+        <button type="button" role="tab" id="tab-history" aria-controls="settings-history" aria-selected="false" tabindex="-1" data-settings-tab="history">Historial</button>
+      </nav>
+      <div class="settings-content">
+        <section id="settings-general" role="tabpanel" aria-labelledby="tab-general" class="settings-page">
+          <h3>Apariencia y página pública</h3>
+          <label class="field">Tema<select id="setting-theme"><option value="light">Claro</option><option value="dark">Oscuro</option></select><small>Se aplica a la app y a la página compartida.</small></label>
+          <label class="field">Título de la página<input id="setting-title" type="text" maxlength="120" placeholder="Archivos compartidos"></label>
+        </section>
+        <section id="settings-security" role="tabpanel" aria-labelledby="tab-security" class="settings-page" hidden>
+          <h3>Acceso a la página</h3>
+          <div class="field"><span>Contraseña de la página</span><p id="page-password-status" class="field-hint">Sin contraseña</p><input id="setting-password" type="password" autocomplete="new-password" placeholder="Escribe una contraseña para establecerla" aria-label="Nueva contraseña de la página"><div class="field-actions"><button type="button" class="btn btn-sm" id="clear-page-password">Quitar contraseña</button><span id="password-change-hint" class="field-hint"></span></div></div>
+          <label class="check-field"><input id="setting-approval" type="checkbox"><span>Solicitar mi aprobación para cada visitante<small>Las solicitudes aparecen en la ventana principal.</small></span></label>
+        </section>
+        <section id="settings-receiving" role="tabpanel" aria-labelledby="tab-receiving" class="settings-page" hidden>
+          <h3>Recibir archivos</h3>
+          <label class="check-field"><input id="setting-uploads" type="checkbox"><span>Permitir subidas desde la página pública</span></label>
+          <label class="field">Carpeta de destino<div class="input-action"><input id="setting-upload-dir" type="text" placeholder="Selecciona una carpeta"><button type="button" class="btn" id="browse-upload-folder">Examinar…</button></div></label>
+          <label class="field">Tamaño máximo por envío (MB)<input id="setting-max-upload" type="number" min="1" max="102400" step="1" inputmode="numeric"></label>
+        </section>
+        <section id="settings-history" role="tabpanel" aria-labelledby="tab-history" class="settings-page history-page" hidden>
+          <h3>Historial de visitantes</h3><label class="field history-search"><span class="sr-only">Buscar visitante</span><input type="search" id="history-search" placeholder="Buscar por nombre o IP"></label><p class="field-hint" id="history-count"></p><ul id="history-list" class="history-list"></ul><p id="history-empty" class="field-hint">Todavía no hay visitas.</p>
+        </section>
+      </div>
+    </div>
+    <footer class="dialog-foot"><p id="settings-error" class="form-error" role="alert" hidden></p><button type="button" class="btn" id="settings-cancel">Cancelar</button><button type="submit" class="btn btn-primary" id="settings-save">Guardar cambios</button></footer>
+  </form>
+</dialog>
+<dialog id="edit-dialog" class="edit-dialog" aria-labelledby="edit-title">
+  <form id="edit-form"><header class="dialog-head"><h2 id="edit-title"></h2></header><div class="edit-body"><p id="edit-description" class="field-hint"></p><label class="field" id="edit-field"><span id="edit-label"></span><input id="edit-input" type="text" autocomplete="off"></label><p id="edit-error" class="form-error" role="alert" hidden></p></div><footer class="dialog-foot"><button type="button" class="btn" id="edit-cancel">Cancelar</button><button type="submit" class="btn btn-primary" id="edit-submit">Guardar</button></footer></form>
+</dialog>
 <script src="app.js"></script>
 </body>
 </html>

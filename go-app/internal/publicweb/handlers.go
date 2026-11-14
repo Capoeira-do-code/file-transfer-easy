@@ -29,7 +29,10 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		s.expiredPage(w)
 		return
 	}
-	s.tracker.Seen(clientIP(r), r.Header.Get("User-Agent"))
+	s.observe(r, true)
+	if id, err := s.ensureSession(w, r); err == nil && s.access != nil {
+		_, _ = s.access.Access(id, clientIP(r), activity.DescribeUserAgent(r.UserAgent()), "", "", false)
+	}
 
 	page, err := fs.ReadFile(s.assets, "index.html")
 	if err != nil {
@@ -66,6 +69,12 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	contentType := mime.TypeByExtension(path.Ext(name))
+	if path.Ext(name) == ".js" {
+		contentType = "text/javascript; charset=utf-8"
+	}
+	if path.Ext(name) == ".css" {
+		contentType = "text/css; charset=utf-8"
+	}
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
@@ -78,23 +87,33 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusGone, map[string]any{"expired": true})
 		return
 	}
-	s.tracker.Seen(clientIP(r), r.Header.Get("User-Agent"))
+	if !s.requireAccess(w, r) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // --------------------------------------------------------------- the manifest
 
 type manifestFile struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Ext          string `json:"ext"`
-	Size         int64  `json:"size"`
-	SizeText     string `json:"sizeText"`
-	Folder       string `json:"folder"`
-	ModifiedText string `json:"modifiedText"`
+	ProtectionName string `json:"protectionName"`
+	ProtectionKind string `json:"protectionKind"`
+	OwnerID        string `json:"ownerId"`
+	Protected      bool   `json:"protected"`
+	Locked         bool   `json:"locked"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Ext            string `json:"ext"`
+	Size           int64  `json:"size"`
+	SizeText       string `json:"sizeText"`
+	Folder         string `json:"folder"`
+	ModifiedText   string `json:"modifiedText"`
 }
 
 type manifestFolder struct {
+	ID        string `json:"id"`
+	Protected bool   `json:"protected"`
+	Locked    bool   `json:"locked"`
 	Name      string `json:"name"`
 	FileCount int    `json:"fileCount"`
 	SizeText  string `json:"sizeText"`
@@ -107,11 +126,16 @@ type manifestTotals struct {
 }
 
 type manifest struct {
-	Title   string           `json:"title"`
-	Files   []manifestFile   `json:"files"`
-	Folders []manifestFolder `json:"folders"`
-	Totals  manifestTotals   `json:"totals"`
-	Expired bool             `json:"expired"`
+	Theme                   string           `json:"theme"`
+	UploadsEnabled          bool             `json:"uploadsEnabled"`
+	MaxUploadMB             int64            `json:"maxUploadMB"`
+	Settings                map[string]any   `json:"settings"`
+	ZipIncludesUnlockedOnly bool             `json:"zipIncludesUnlockedOnly"`
+	Title                   string           `json:"title"`
+	Files                   []manifestFile   `json:"files"`
+	Folders                 []manifestFolder `json:"folders"`
+	Totals                  manifestTotals   `json:"totals"`
+	Expired                 bool             `json:"expired"`
 }
 
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +143,9 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusGone, manifest{Expired: true})
 		return
 	}
-	s.tracker.Seen(clientIP(r), r.Header.Get("User-Agent"))
+	if !s.requireAccess(w, r) {
+		return
+	}
 
 	// Pick up files the host added or deleted since the last poll.
 	s.store.Rescan(false)
@@ -130,10 +156,19 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		Files:   make([]manifestFile, 0, len(entries)),
 		Folders: make([]manifestFolder, 0),
 	}
+	settings := s.publicSettings()
+	payload.Title = settings.PageTitle
+	payload.Theme = settings.Theme
+	payload.UploadsEnabled = settings.UploadsEnabled
+	payload.MaxUploadMB = settings.MaxUploadMB
+	payload.ZipIncludesUnlockedOnly = true
+	payload.Settings = map[string]any{"theme": settings.Theme, "uploadsEnabled": settings.UploadsEnabled, "maxUploadMB": settings.MaxUploadMB, "pageTitle": settings.PageTitle, "errorMessage": settings.ErrorMessage}
 
 	var total int64
 	for _, entry := range entries {
+		owner, name, kind, protected, allowed := s.effectiveProtection(r, entry)
 		payload.Files = append(payload.Files, manifestFile{
+			OwnerID: owner, ProtectionName: name, ProtectionKind: kind, Protected: protected, Locked: !allowed,
 			ID:           entry.ID,
 			Name:         entry.Name,
 			Ext:          entry.Ext,
@@ -147,6 +182,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 
 	for _, folder := range s.store.Folders() {
 		payload.Folders = append(payload.Folders, manifestFolder{
+			ID: folder.ID, Protected: s.access != nil && s.access.ItemProtected(folder.ID), Locked: s.access != nil && !s.access.ItemAllowed(s.sessionID(r), clientIP(r), folder.ID),
 			Name:      folder.Name,
 			FileCount: folder.FileCount,
 			SizeText:  format.Bytes(folder.Size),
@@ -168,15 +204,23 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Este enlace ya no está disponible", http.StatusGone)
 		return
 	}
+	if !s.requireAccess(w, r) {
+		return
+	}
 
 	entry, ok := s.store.Entry(r.PathValue("id"))
 	if !ok {
 		http.Error(w, "Ese archivo ya no está compartido", http.StatusNotFound)
 		return
 	}
+	if !s.itemAllowed(r, entry) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "locked": true, "error": "Introduce la contraseña de este archivo o carpeta"})
+		return
+	}
 	file, err := os.Open(entry.Path)
 	if err != nil {
-		http.Error(w, "No se pudo abrir el archivo", http.StatusNotFound)
+		code, message := fileError(err)
+		writeJSON(w, code, map[string]any{"ok": false, "error": message})
 		return
 	}
 	defer file.Close()
@@ -184,6 +228,10 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	info, err := file.Stat()
 	if err != nil {
 		http.Error(w, "No se pudo leer el archivo", http.StatusInternalServerError)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "Este elemento ya no es un archivo descargable"})
 		return
 	}
 
@@ -195,8 +243,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", contentDisposition(entry.Name))
 
 	transfer := s.tracker.StartTransfer("file", entry.Name, ip, info.Size())
-	status := s.stream(w, file, transfer, r)
+	status := s.streamEntry(w, file, transfer, r, entry)
 	s.tracker.FinishTransfer(transfer, status)
+	if status == "done" {
+		s.downloaded(ip, info.Size())
+	}
 }
 
 func (s *Server) handleZip(w http.ResponseWriter, r *http.Request) {
@@ -204,10 +255,22 @@ func (s *Server) handleZip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Este enlace ya no está disponible", http.StatusGone)
 		return
 	}
+	if !s.requireAccess(w, r) {
+		return
+	}
 
-	entries := s.store.Entries()
+	entries := make([]core.Entry, 0)
+	for _, entry := range s.store.Entries() {
+		if s.itemAllowed(r, entry) {
+			entries = append(entries, entry)
+		}
+	}
 	if len(entries) == 0 {
-		http.Error(w, "No hay nada que descargar", http.StatusNotFound)
+		if len(s.store.Entries()) > 0 {
+			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "locked": true, "error": "Desbloquea algún archivo antes de descargar el ZIP"})
+		} else {
+			http.Error(w, "No hay nada que descargar", http.StatusNotFound)
+		}
 		return
 	}
 
@@ -228,16 +291,25 @@ func (s *Server) handleZip(w http.ResponseWriter, r *http.Request) {
 	transfer := s.tracker.StartTransfer("zip", name, ip, total)
 	status := s.streamZip(w, entries, transfer, r)
 	s.tracker.FinishTransfer(transfer, status)
+	if status == "done" {
+		s.downloaded(ip, total)
+	}
 }
 
 // stream copies a file to the client, reporting progress and honouring both
 // cancellation from the host and the client hanging up.
 func (s *Server) stream(w http.ResponseWriter, src io.Reader, transfer *activity.Transfer, r *http.Request) string {
+	return s.streamEntry(w, src, transfer, r, core.Entry{})
+}
+func (s *Server) streamEntry(w http.ResponseWriter, src io.Reader, transfer *activity.Transfer, r *http.Request, entry core.Entry) string {
 	flusher, _ := w.(http.Flusher)
 	buffer := make([]byte, copyBuffer)
 	var sent int64
 
 	for {
+		if !s.transferAllowed(r) || (entry.ID != "" && !s.itemAllowed(r, entry)) {
+			return "cancelled"
+		}
 		select {
 		case <-transfer.Cancelled():
 			return "cancelled"
@@ -279,6 +351,10 @@ func (s *Server) streamZip(w http.ResponseWriter, entries []core.Entry, transfer
 
 entries:
 	for _, entry := range entries {
+		if !s.transferAllowed(r) || !s.itemAllowed(r, entry) {
+			status = "cancelled"
+			break entries
+		}
 		select {
 		case <-transfer.Cancelled():
 			status = "cancelled"
@@ -308,6 +384,11 @@ entries:
 		}
 
 		for {
+			if !s.transferAllowed(r) || !s.itemAllowed(r, entry) {
+				file.Close()
+				status = "cancelled"
+				break entries
+			}
 			select {
 			case <-transfer.Cancelled():
 				file.Close()

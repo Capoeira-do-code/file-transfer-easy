@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="File Transfer Easy"
 BUNDLE_ID="com.filetransfereasy.desktop"
-VERSION="${VERSION:-1.0.1}"
+VERSION="${VERSION:-$(cat VERSION)}"
 BINARY="file-transfer-easy"
 DIST="dist"
 FINAL_APP="$DIST/$APP_NAME.app"
@@ -53,7 +53,7 @@ build_arch() {
   CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" \
     CGO_CFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
     CGO_LDFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
-    go build -trimpath \
+    go build -tags production -trimpath \
       -ldflags "-s -w -X main.version=$VERSION" \
       -o "$out" .
 }

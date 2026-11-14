@@ -110,7 +110,7 @@ func run() error {
 		// page, which is what lets the UI stay a plain sandboxed web page.
 		EnableFileDrop:             true,
 		DefaultContextMenuDisabled: true,
-		BackgroundColour:           application.NewRGB(22, 22, 29),
+		BackgroundColour:           application.NewRGB(32, 32, 32),
 		InitialPosition:            application.WindowCentered,
 		Mac: application.MacWindow{
 			// The inset title bar gives the traffic lights room while letting
@@ -121,6 +121,7 @@ func run() error {
 		},
 	})
 
+	configureWindowIcon(window)
 	desktop.attach(wails, window, core)
 	// Clicking the Dock icon should bring a hidden sharing window back.
 	wails.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
@@ -144,8 +145,8 @@ func run() error {
 		window.Hide()
 	})
 
-	// SystemTray.Run() is a no-op until the application is running, so the tray
-	// has to be built from the started event rather than before Run().
+	// Build the tray once the application is ready (the macOS native tray
+	// needs AppKit). Wails starts its own tray automatically in New().
 	wails.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		buildTray(wails, core, desktop)
 		if paths := launchPaths(os.Args, ""); len(paths) > 0 {

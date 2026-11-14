@@ -9,7 +9,10 @@
 Unicode true
 
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !define VERSION "1.1.0"
+!endif
+!ifndef SOURCE_EXE
+  !define SOURCE_EXE "..\dist\FileTransferEasy-${VERSION}-windows-amd64.exe"
 !endif
 
 !define APP_NAME    "File Transfer Easy"
@@ -57,7 +60,7 @@ Section "Install"
   nsExec::Exec 'taskkill /F /IM "${APP_EXE}"'
   Pop $0
 
-  File "..\dist\${APP_EXE}"
+  File /oname=${APP_EXE} "${SOURCE_EXE}"
 
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"

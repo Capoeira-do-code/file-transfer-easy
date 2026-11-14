@@ -1,4 +1,82 @@
-# Validación 1.0.1 — macOS y Linux
+# Validación
+
+## Ajustes y transferencias 1.1.0 — 14 de noviembre de 2026
+
+- `go test ./...` y `go vet ./...`: ajustes persistentes, protección de página
+  y de archivos/carpetas, revocación de permisos, solicitudes, bloqueo de IP,
+  historial y subidas. Las rutas administrativas requieren el token local.
+- `node scripts/test-windows-ui.mjs`: carga con asociaciones MIME incorrectas,
+  un solo tray, iconos nativos, reapertura y recuperación de WebView2.
+- `node scripts/test-sharing-features.mjs`: dos WebView2 y servidor real en
+  loopback. Tema claro inicial y sincronización del oscuro, configuración,
+  contraseñas, aceptar/rechazar, descargas protegidas, subida con comparación de
+  bytes, nombres del historial y bloqueo/desbloqueo. No inicia un túnel.
+- `FTE_E2E=1 go test ./internal/app -run EndToEnd -v -timeout 5m`: Cloudflare
+  real, descarga y ZIP, cookie HTTPS, contraseña incorrecta, aprobación,
+  desbloqueo y subida multipart. El contenido recibido coincide byte a byte;
+  se usan archivos sintéticos y el túnel se cierra al terminar.
+- Escenarios del adaptador `scripts/test-ui.swift` ejecutados también en Node:
+  estados de conexión y errores, ajustes, recepción sin archivos, solicitudes,
+  historial, menús y protección. Abrir ajustes antes de recibir el estado
+  inicial espera la configuración; un error transitorio conserva el último estado válido.
+- Capturas de WebView2: escritorio vacío/activo, ajustes por pestañas y menús,
+  página pública y acceso con contraseña/solicitud, claro/oscuro y móvil de
+  390 px. Sin desbordamiento horizontal en las vistas comprobadas.
+- Las subidas comprueban autorización durante la recepción y el commit,
+  límites, nombres, enlaces y ausencia de sobrescritura. Los destinos en
+  preparación quedan excluidos de las carpetas compartidas hasta completarse.
+- Los errores muestran el motivo concreto, incluidas las comprobaciones
+  previas a la descarga y ZIP. El HTML público no contiene los avisos retirados
+  sobre mantener encendido el equipo o abierta la aplicación.
+
+El detector de carreras no pudo iniciarse en este escritorio Windows con el
+toolchain auxiliar (ThreadSanitizer, error de asignación de memoria 87). El
+workflow de compilación incluye la comprobación `-race` en Ubuntu.
+
+Los paquetes versionados, sus SHA-256 y las instrucciones de compilación están
+descritos en [BUILDING.md](BUILDING.md).
+
+## Interfaz e iconos de Windows 1.0.3 — 14 de noviembre de 2026
+
+- Interfaz de escritorio con superficies neutras, acento azul, tipografía del
+  sistema y controles compactos. Se retiran el título de portada, las
+  ilustraciones decorativas, las sombras de las tarjetas y las etiquetas redundantes.
+- Capturas de WebView2 con datos simulados, sin iniciar túneles: vista vacía y
+  sesión activa en claro/oscuro, a 1024 × 681 y 820 × 520. Sin desbordamiento
+  horizontal; contraste de texto superior a 4.5:1 en ambas paletas.
+- El ICO se incrusta como recurso `#3`, que espera Wails. Se asignan también
+  los iconos grande, pequeño y de clase de la ventana de Windows.
+- `node scripts/test-windows-ui.mjs` compara los iconos nativos con el ICO
+  píxel a píxel y comprueba bandeja, reapertura y recuperación tras caídas.
+- `go test ./...`, `go vet ./...` y estados de frontend vacío, preparación,
+  enlace activo y error.
+
+El ejecutable se entrega como `dist/FileTransferEasy-1.0.3.exe` para conservar
+la versión anterior mientras está abierta.
+
+## Corrección de Windows — 14 de noviembre de 2026
+
+- Wails actualizado de `v3.0.0-beta.11` a `v3.0.0`: recupera la WebView tras
+  caídas del renderer o del proceso del navegador, que antes dejaban la ventana vacía.
+- Eliminado el segundo `tray.Run()`: `SystemTray.New()` ya inicia el icono.
+  Un arranque instrumentado con `WndProcInterceptor` pasó de cuatro ventanas
+  nativas a tres al eliminar la creación extra del tray.
+- JavaScript y CSS se sirven con tipos MIME explícitos, independientemente de
+  las asociaciones del registro de Windows. La regresión simula `.js=text/csv`
+  y `.css=application/octet-stream`: fallaba antes y pasa con la corrección.
+- Los controles para añadir archivos se muestran desde el HTML inicial,
+  mientras llega el estado del servidor.
+- `node scripts/test-windows-ui.mjs`: WebView2 real con MIME incorrecto,
+  opciones y estilos, ocultar/reabrir sin duplicados y recuperación tras
+  `Page.crash` y `Browser.crash` manteniendo la misma sesión local.
+- `go test ./...`, `go vet ./...` y estados de frontend vacío, preparación,
+  enlace activo y error con un user-agent de Windows.
+
+El controlador visual del escritorio no estaba disponible. Estas comprobaciones
+usan el protocolo de diagnóstico de WebView2; no sustituyen una revisión manual
+de los menús y del icono sobre la barra de tareas.
+
+## Validación 1.0.1 — macOS y Linux
 
 Realizada el 4 de octubre de 2026 desde Apple Silicon, macOS 27.2.
 Los artefactos están generados; las comprobaciones nativas pendientes se indican abajo.

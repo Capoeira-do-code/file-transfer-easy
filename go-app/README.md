@@ -10,6 +10,31 @@ ventana y seguir compartiendo.
 Reescritura en Go de la app original en Python/PySide6, que sigue en la raíz del
 repositorio. Un ejecutable con webview del sistema; Linux requiere GTK3 y WebKitGTK 4.1.
 
+## Ajustes y acceso en 1.1.0
+
+El botón de configuración está en la esquina superior derecha. El tema claro
+es el predeterminado; al cambiarlo se actualizan la app y las páginas públicas
+abiertas. Los ajustes se guardan entre sesiones.
+
+- **Seguridad**: contraseña para toda la página y aprobación manual de cada
+  visitante. Las solicitudes aparecen en la app, también si la ventana estaba
+  oculta; el propietario puede aceptar o rechazar cada conexión.
+- **Archivos y carpetas**: clic derecho o botón de opciones para mostrar en el
+  explorador, quitar de la lista o establecer/cambiar/quitar una contraseña.
+  Las carpetas protegen sus archivos; el ZIP incluye los archivos desbloqueados.
+- **Recepción**: habilita las subidas, elige la carpeta de destino y limita el
+  tamaño por envío. Se puede crear un enlace sólo para recibir archivos. Las
+  subidas terminadas aparecen en la app y no sobrescriben archivos existentes.
+- **Visitantes**: quitar de la lista actual o bloquear su IP. El bloqueo revoca
+  permisos y cancela sus transferencias activas. El historial conserva visitas
+  entre sesiones y permite asignar nombres a las IP para reconocerlas después.
+
+Las contraseñas se guardan como hashes PBKDF2 con sal; los permisos del navegador
+caducan y no se restauran al reiniciar. La configuración, los nombres y el
+historial se guardan en `access.json` dentro del directorio de configuración del
+usuario (`%APPDATA%\\FileTransferEasy` en Windows). No se incluyen en los paquetes
+ni en las instantáneas de fuentes.
+
 ---
 
 ## Cómo funciona
@@ -27,7 +52,7 @@ Hay **dos servidores HTTP** y la separación es deliberada:
 | | Escucha en | Quién entra | Qué expone |
 |---|---|---|---|
 | Interfaz | `127.0.0.1`, puerto aleatorio | solo la ventana, con un token por ejecución | todo el control de la app |
-| Público | todas las interfaces, puerto aleatorio | el túnel y la red local | solo lectura, bajo `/s/<token>` |
+| Público | todas las interfaces, puerto aleatorio | visitantes autorizados por el túnel o la red local | descargas y, si se habilitan, subidas bajo `/s/<token>` |
 
 Aunque el enlace del túnel se filtrara, no da acceso a ningún control: esas
 rutas solo existen en el servidor de la interfaz, que está atado a loopback y
@@ -51,6 +76,9 @@ sondeo no sea lo que envenene la caché del sistema del usuario.
 ---
 
 ## Compilar
+
+La versión predeterminada está en [VERSION](VERSION). Los comandos, toolchains,
+nombres de artefactos y el snapshot de fuentes están en [BUILDING.md](BUILDING.md).
 
 Necesitas la versión de Go indicada en `go.mod` (actualmente Go 1.27). En macOS, las Command Line Tools de Xcode.
 
@@ -94,6 +122,8 @@ go run .                       # arranca la app
 go test ./internal/...         # pruebas
 go test -race ./internal/...   # con detector de carreras
 swift scripts/test-ui.swift    # arranque, estados y controles de la UI (macOS)
+node scripts/test-windows-ui.mjs # WebView2, recuperación y bandeja (Windows, Node 22+)
+node scripts/test-sharing-features.mjs # contraseñas, solicitudes, recepción y temas con dos WebView2 reales
 ./scripts/test-native-macos.sh # receptor AppKit de archivos y menú (macOS)
 go run ./cmd/genicons          # regenera todos los iconos
 ```

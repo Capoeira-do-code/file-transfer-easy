@@ -254,6 +254,7 @@ func TestPingRegistersVisitor(t *testing.T) {
 	handler, _, tracker, _ := newFixture(t)
 
 	request := httptest.NewRequest(http.MethodPost, "/s/"+testToken+"/ping", strings.NewReader("{}"))
+	request.RemoteAddr = "127.0.0.1:44000"
 	request.Header.Set("CF-Connecting-IP", "203.0.113.9")
 	request.Header.Set("User-Agent", "Mozilla/5.0 (iPhone) Safari/605")
 	recorder := httptest.NewRecorder()
@@ -288,10 +289,11 @@ func TestClientIPPrefersCloudflareHeader(t *testing.T) {
 		{"cloudflare gana", map[string]string{
 			"CF-Connecting-IP": "1.1.1.1",
 			"X-Forwarded-For":  "2.2.2.2",
-		}, "3.3.3.3:100", "1.1.1.1"},
+		}, "127.0.0.1:100", "1.1.1.1"},
 		{"forwarded-for toma el primero", map[string]string{
 			"X-Forwarded-For": "2.2.2.2, 4.4.4.4",
-		}, "3.3.3.3:100", "2.2.2.2"},
+		}, "[::1]:100", "2.2.2.2"},
+		{"LAN no puede suplantar una IP", map[string]string{"CF-Connecting-IP": "1.1.1.1", "X-Forwarded-For": "2.2.2.2"}, "192.0.2.9:100", "192.0.2.9"},
 		{"sin cabeceras usa la conexión", nil, "3.3.3.3:100", "3.3.3.3"},
 	}
 

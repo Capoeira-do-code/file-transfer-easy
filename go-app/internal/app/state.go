@@ -3,6 +3,7 @@ package app
 import (
 	"time"
 
+	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/access"
 	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/activity"
 	"github.com/Capoeira-do-code/file-transfer-easy/go-app/internal/format"
 )
@@ -36,13 +37,16 @@ var statusText = map[ShareStatus]string{
 // State is the payload the desktop UI renders. Field names match the contract
 // the frontend was written against, so changes here are breaking changes.
 type State struct {
-	Items     []ItemView     `json:"items"`
-	Totals    TotalsView     `json:"totals"`
-	Share     ShareView      `json:"share"`
-	Visitors  []VisitorView  `json:"visitors"`
-	Transfers []TransferView `json:"transfers"`
-	Stats     StatsView      `json:"stats"`
-	Log       []LogView      `json:"log"`
+	Items     []ItemView          `json:"items"`
+	Totals    TotalsView          `json:"totals"`
+	Share     ShareView           `json:"share"`
+	Visitors  []VisitorView       `json:"visitors"`
+	Transfers []TransferView      `json:"transfers"`
+	Stats     StatsView           `json:"stats"`
+	Log       []LogView           `json:"log"`
+	Settings  access.SettingsView `json:"settings"`
+	History   []HistoryView       `json:"history"`
+	Requests  []access.Request    `json:"requests"`
 }
 
 type ItemView struct {
@@ -56,12 +60,18 @@ type ItemView struct {
 	FileCount int    `json:"fileCount"`
 	Missing   bool   `json:"missing"`
 	AddedAt   string `json:"addedAt"`
+	Protected bool   `json:"protected"`
 }
 
 type TotalsView struct {
 	Items     int    `json:"items"`
 	Files     int    `json:"files"`
 	Bytes     int64  `json:"bytes"`
+	BytesText string `json:"bytesText"`
+}
+
+type HistoryView struct {
+	access.Visitor
 	BytesText string `json:"bytesText"`
 }
 
@@ -84,6 +94,8 @@ type VisitorView struct {
 	Downloads int    `json:"downloads"`
 	Bytes     int64  `json:"bytes"`
 	BytesText string `json:"bytesText"`
+	Name      string `json:"name"`
+	Blocked   bool   `json:"blocked"`
 }
 
 type TransferView struct {
@@ -101,10 +113,13 @@ type TransferView struct {
 }
 
 type StatsView struct {
-	Downloads int    `json:"downloads"`
-	Bytes     int64  `json:"bytes"`
-	BytesText string `json:"bytesText"`
-	Visitors  int    `json:"visitors"`
+	Downloads         int    `json:"downloads"`
+	Bytes             int64  `json:"bytes"`
+	BytesText         string `json:"bytesText"`
+	Visitors          int    `json:"visitors"`
+	Uploads           int    `json:"uploads"`
+	ReceivedBytes     int64  `json:"receivedBytes"`
+	ReceivedBytesText string `json:"receivedBytesText"`
 }
 
 type LogView struct {
@@ -118,6 +133,12 @@ func (a *App) Snapshot() State {
 	items := a.Store.Items()
 	totals := a.Store.Totals()
 	visitors, transfers, stats, logs := a.Tracker.Snapshot()
+	requests := a.Access.Requests()
+	for i := range requests {
+		if name := a.Access.Name(requests[i].IP); name != "" {
+			requests[i].Name = name
+		}
+	}
 
 	state := State{
 		Items:     make([]ItemView, 0, len(items)),
@@ -131,12 +152,18 @@ func (a *App) Snapshot() State {
 			BytesText: format.Bytes(totals.Bytes),
 		},
 		Stats: StatsView{
-			Downloads: stats.Downloads,
-			Bytes:     stats.Bytes,
-			BytesText: format.Bytes(stats.Bytes),
-			Visitors:  stats.Visitors,
+			Downloads:         stats.Downloads,
+			Bytes:             stats.Bytes,
+			BytesText:         format.Bytes(stats.Bytes),
+			Visitors:          stats.Visitors,
+			Uploads:           stats.Uploads,
+			ReceivedBytes:     stats.ReceivedBytes,
+			ReceivedBytesText: format.Bytes(stats.ReceivedBytes),
 		},
-		Share: a.shareView(),
+		Share:    a.shareView(),
+		Settings: a.Access.Settings(),
+		History:  make([]HistoryView, 0),
+		Requests: requests,
 	}
 
 	for _, item := range items {
@@ -151,6 +178,7 @@ func (a *App) Snapshot() State {
 			FileCount: item.FileCount,
 			Missing:   item.Missing,
 			AddedAt:   item.AddedAt.UTC().Format(time.RFC3339),
+			Protected: a.Access.ItemProtected(item.ID),
 		})
 	}
 
@@ -165,7 +193,12 @@ func (a *App) Snapshot() State {
 			Downloads: visitor.Downloads,
 			Bytes:     visitor.Bytes,
 			BytesText: format.Bytes(visitor.Bytes),
+			Name:      a.Access.Name(visitor.IP),
+			Blocked:   a.Access.IsBlocked(visitor.IP),
 		})
+	}
+	for _, visitor := range a.Access.History() {
+		state.History = append(state.History, HistoryView{Visitor: visitor, BytesText: format.Bytes(visitor.Bytes)})
 	}
 
 	for _, transfer := range transfers {

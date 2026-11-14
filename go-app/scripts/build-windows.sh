@@ -12,9 +12,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-$(cat VERSION)}"
 DIST="dist"
-EXE="$DIST/FileTransferEasy.exe"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION debe usar X.Y.Z" >&2; exit 1; }
+EXE="$DIST/FileTransferEasy-$VERSION-windows-amd64.exe"
 
 say() { printf '\033[36m▸\033[0m %s\n' "$1"; }
 
@@ -39,12 +40,13 @@ trap cleanup EXIT
 say "Compilando windows/amd64…"
 # -H windowsgui stops a console window from opening behind the app.
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
-  go build -trimpath \
+  go build -tags production -trimpath \
     -ldflags "-s -w -H windowsgui -X main.version=$VERSION" \
     -o "$EXE" .
 
 say "Listo:"
 echo "    $EXE"
+(cd "$DIST" && if command -v sha256sum >/dev/null; then sha256sum "$(basename "$EXE")"; else shasum -a 256 "$(basename "$EXE")"; fi) > "$EXE.sha256"
 echo
 echo "El instalador NSIS se genera en Windows con scripts\\build-windows.ps1,"
 echo "o automáticamente al publicar un tag mediante GitHub Actions."
